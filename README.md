@@ -2,13 +2,47 @@
 
 ### 1.1 RAG基本介绍
 
+#### 1.1.1 RAG是什么
+
 开源的基座模型参数量不够大，本身拥有的能力有限。要完成复杂的知识密集型的任务，可以基于语言模型构建一个系统，通过访问外部知识源来做到。这样可以使生成的答案更可靠，有助于缓解“幻觉”问题。
 
 RAG 会接受输入并检索出一组相关/支撑的文档，并给出文档的来源。这些文档作为上下文和输入的原始提示词组合，送给文本生成器得到最终的输出。这样 RAG 更加适应事实会随时间变化的情况，这非常有用，因为 LLM 的参数化知识是静态的，RAG 让语言模型不用重新训练就能够获取最新的信息，基于检索生成产生可靠的输出。
 
 ![RAG基本介绍](README.assets/RAG基本介绍.png)
 
-### 1.2 RAG基本流程
+#### 1.1.2 RAG发展历程
+
+“RAG”概念由Lewis在2020年引入，其发展迅速，标志着研究旅程中的不同阶段。最初，这项研究旨在通过在预训练阶段为它们注入额外知识来增强语言模型。ChatGPT的推出引发了对利用大型模型进行深度上下文理解的高度兴趣，加速了RAG在推断阶段的发展。随着研究人员更深入地探索大型语言模型（LLMs）的能力，焦点转向提升他们的可控性和推理技巧以跟上日益增长的需求。GPT-4 的出现标志着一个重要里程碑，它革新了 RAG ，采取一种将其与微调技术相结合的新方法，并继续优化预训练策略。
+
+![RAG发展时间轴](README.assets/RAG发展时间轴.png)
+
+#### 1.1.3 RAG生态及挑战
+
+RAG的应用已不再局限于问答系统，其影响力正在扩展到更多领域。现在，诸如推荐系统、信息提取和报告生成等各种任务开始从RAG技术的应用中受益。与此同时，RAG技术栈正在经历一次繁荣。除了众所周知的工具如Langchain和LlamaIndex外，市场上也出现了更多针对性强的RAG工具，例如：为满足更专注场景需求而定制化的；为进一步降低入门门槛而简化使用的；以及功能专业化、逐渐面向生产环境目标发展的。
+
+RAG当前面临的挑战：
+
+- 上下文长度：当检索到的内容过多并超出窗口限制时该怎么办？如果LLMs的上下文窗口不再受限，应如何改进RAG？
+- 鲁棒性：如何处理检索到的错误内容？如何筛选和验证检索到的内容？如何增强模型对毒化和噪声的抵抗力？
+- 与微调协同工作：如何同时利用RAG和FT的效果，它们应该如何协调、组织，是串行、交替还是端对端？
+- 规模定律：RAG模型是否满足规模定律？会有什么情况下可能让RAG经历逆向规模定律现象呢？
+- 生产环境应用：如何减少超大规模语料库的检索延迟? 如何确保被 LLMS 检索出来的内容不会泄露?
+
+### 1.2 RAG技术实现
+
+#### 1.2.1 RAG技术范式
+
+在RAG的技术发展中，我们从技术范式的角度总结了其演变过程，主要分为以下几个阶段：
+
+- 初级RAG：初级RAG主要包括三个基本步骤：1）索引——将文档语料库切分成更短的片段，并通过编码器建立向量索引。2）检索——根据问题和片段之间的相似性检索相关文档片段。3）生成——依赖于检索到的上下文来生成对问题的回答。
+- 高级RAG：初级RAG在检索、生成和增强方面面临多重挑战。随后提出了高级RAG范式，涉及到预检索和后检索阶段额外处理。在检索之前，可以使用查询重写、路由以及扩展等方法来调整问题与文档片段之间语义差异。在检索之后，重新排列已获取到的文档语料库可以避免"迷失在中间"现象，或者可以过滤并压缩上下文以缩短窗口长度。
+- 模块化RAG：随着RAG技术进一步发展和演变，模块化RAG的概念诞生了。结构上，它更自由灵活，引入更具体功能模块如查询搜索引擎以及多答案融合。技术层面上，它将信息查找与微调、强化学习等技术集成起来。在流程方面，RAG模块设计并协同工作形成各种不同类型RAG。
+
+然而，模块化 RAG 并非突然出现，这三种范式存在继承与发展关系。高级RAG是模块化RAG的特殊情况，而初级RAG是高级RAG的特殊情况。
+
+![RAG技术范式](README.assets/RAG技术范式.png)
+
+#### 1.2.2 RAG基本流程
 
 基本流程概述：用户输入问题——>问题重构（补全指代信息，保证多轮对话的能力）——>从检索库检索答案——用LLM总结答案
 
@@ -19,11 +53,33 @@ RAG 由两部分组成：
 
 ![RAG原理](README.assets/RAG原理.png)
 
+#### 1.2.3 选择RAG还是微调
+
+除了RAG之外，LLMs的主要优化策略还包括提示工程和微调（FT）。每种都有其独特的特点。根据它们对外部知识的依赖性以及对模型调整的需求，每种都有适合的应用场景。
+
+![RAG与FT的比较](README.assets/RAG与FT的比较.jpg)
+
+RAG就像是给模型提供了一本定制信息检索的教科书，非常适合特定的查询。另一方面，FT就像一个学生随着时间内化知识，更适合模仿特定的结构、风格或格式。通过增强基础模型的知识、调整输出和教授复杂指令，FT可以提高模型的性能和效率。然而，它并不擅长整合新知识或快速迭代新用例。RAG和FT并不互斥，它们相辅相成，并且同时使用可能会产生最好的结果。
+
+![RAG与FT的关系](README.assets/RAG与FT的关系.png)
+
+#### 1.2.4 如何评价RAG的效果
+
+对RAG的评估方法多种多样，主要包括三个质量分数：上下文相关性、答案准确性和答案相关性。此外，评估还涉及四项关键能力：抗噪声能力、拒绝能力、信息整合以及反事实鲁棒性。这些评价维度将传统的定量指标与针对RAG特点的专门评估标准相结合，尽管这些标准尚未得到标准化。
+
+在评价框架方面，有RGB和RECALL等基准测试，以及像RAGAS、ARES和TruLens等自动化评价工具，它们帮助全面衡量RAG模型的表现。
+
+![如何评价RAG的效果](README.assets/如何评价RAG的效果.png)
+
 ## 2. 部署大模型服务
+
+实验环境：租用的AutoDL的GPU服务器，NVIDIA RTX 4090 / 24GB，Ubuntu20.04，Python 3.8， CUDA 11.3
+
+- 关于GPU服务器租用这里就不赘述了，详见我的另一篇博客：[常用深度学习平台的使用指南](https://www.eula.club/blogs/常用深度学习平台的使用指南.html)
 
 ### 2.1 大模型基座选型
 
-选用当下效果比较好的Baichuan13B大模型，以下将会提供普通服务和流式服务两种调用方式。
+选用当下效果比较好的Baichuan2-13B-Chat大模型，以下将会提供普通服务和流式服务两种调用方式。
 
 - 项目地址：[https://github.com/baichuan-inc/Baichuan2](https://github.com/baichuan-inc/Baichuan2)
 
@@ -36,6 +92,8 @@ RAG 由两部分组成：
 | 4bits       | 5.1          | 8.6           |
 
 ### 2.2 准备部署代码
+
+这里未使用vLLM等技术对推理服务的性能进行优化，实际投入使用的时候建议开启vLLM，这样可以充分利用显卡计算资源，带来更好的推理性能，详见我的另一篇博客：[基于vLLM加速大模型推理服务](https://www.eula.club/blogs/基于vLLM加速大模型推理服务.html)
 
 #### 2.2.1 普通服务的代码
 
@@ -328,9 +386,9 @@ if __name__ == '__main__':
 
 ![Baichuan2-13B-Chat-8bits量化的运行效果](README.assets/Baichuan2-13B-Chat-8bits量化的运行效果.png)
 
-### 2.5 对服务进行压力测试
+#### 2.4.4 服务压力测试
 
-实验环境：单卡 NVIDIA A40 / 48GB，跑的全精度 Baichuan2-13B-Chat 模型，使用如下脚本对普通服务进行压测。
+可使用如下脚本对普通服务进行压测。
 
 ```python
 # -*- coding: utf-8 -*-
@@ -415,23 +473,109 @@ if __name__ == '__main__':
     print(f"整体最短耗时: {stats['min_duration']:.2f}s, 整体最长耗时: {stats['max_duration']:.2f}s, 整体平均耗时: {avg_duration:.2f}s")
 ```
 
-测试效果：1线程平均耗时16.32s，3线程平均耗时49.21s，5线程平均耗时82.62s，10线程平均耗时172.23s。它是可以扛住少量并发的，但开多线程并不能提高处理效率。如果出现少量并发都出现大模型预测出错问题，那说明是显卡不行（比如3090、A6000），跟代码无关，可以考虑Nginx负载均衡，详见我的另外一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
-
-![Baichuan大模型服务的压力测试](README.assets/Baichuan大模型服务的压力测试.png)
-
 ## 3. 检索增强大模型生成实例
 
-### 3.1 实例场景概述
+实例场景概述：有一批内部的政府政策文档，数据不可外传，使用自部署的大模型来实现，需要基于这些文档进行垂直领域的问答。
 
-需求场景：有一批内部的政府政策文档，数据不可外传，只能使用自托管大模型来实现，需要基于这些文档进行垂直领域的问答。
+本项目我已经在Github上进行了开源，项目地址为：[https://github.com/Logistic98/rag-llm](https://github.com/Logistic98/rag-llm)
 
-数据预处理：提供的文档主要是Word、PDF等格式，无法直接使用，需要将数据预处理再入检索库，这里是处理成txt格式了。
+数据不便于公开，所以用于构建检索库的数据文件只留了一个示例，用于构建检索库的数据这里是处理成JSON格式了。
 
-![检索增强大模型生成-数据预处理后的格式](README.assets/检索增强大模型生成-数据预处理后的格式.png)
+![数据预处理后的格式-用于构建检索库](README.assets/数据预处理后的格式-用于构建检索库.png)
 
-数据预处理要求：数据量少的话，可以人工去做，做的方法是每个文档拆开，拆开后每个数据是：“文档标题+文档中的某一段”，目的是保证每条数据都有较完整的语义，并且长度不会太长（1000个token以内最好，当然肯定是越短越好，会更加准确）。
+### 3.1 原始数据预处理
 
-注意：本项目由于数据不便于公开，所以用于构建检索库的数据文件我删掉了，使用时需要自己去补全。
+#### 3.1.1 数据预处理要求
+
+数据预处理：需要将数据预处理成结构化数据之后，才能方便的构建检索库。
+
+- 数据预处理要求：每个文档拆开，拆开后每个数据是文档中的某一段，目的是保证每条数据都有较完整的语义，并且长度不会太长。
+- 数据预处理方式：提供的文档主要是Word、PDF等格式，无法直接使用。数据量少的话，可以直接人工去处理。数据量大的话，建议先使用脚本批量处理一下，有些解析不成功的再人工处理。
+
+#### 3.1.2 数据预处理脚本
+
+PDF格式是非常难处理的，如果是文本类型的可以使用以下脚本来初步处理，如果本身就是图片类型的，那该脚本解析不了，就需要OCR技术来辅助了。关于复杂PDF文件的解析可以使用 Marker 库，详见我的另一篇博客：[PDF解析与基于LLM的本地知识库问答](https://www.eula.club/blogs/PDF解析与基于LLM的本地知识库问答.html)
+
+pdf2word.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+from pdf2docx import Converter
+import argparse
+
+parser = argparse.ArgumentParser(description="服务调用方法：python pdf2word.py --pdf_path 'xxx.pdf' --docx_path 'xxx.docx'")
+parser.add_argument("--pdf_path", type=str, required=True, help="要解析的 PDF 文件地址")
+parser.add_argument("--docx_path", type=str, required=True, help="解析后的 DOCX 文件输出地址")
+args = parser.parse_args()
+
+# 确保输出文件的目录存在
+docx_dir = os.path.dirname(args.docx_path)
+if not os.path.exists(docx_dir):
+    os.makedirs(docx_dir)
+
+try:
+    # 初始化转换器并转换 PDF 到 DOCX
+    cv = Converter(args.pdf_path)
+    cv.convert(args.docx_path)  # 默认转换所有页面
+    cv.close()
+    print("PDF 文件已成功转换为 DOCX 格式。")
+except Exception as e:
+    print(f"转换过程中发生错误：{str(e)}")
+```
+
+word2json.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+from docx import Document
+import json
+import argparse
+
+parser = argparse.ArgumentParser(description="服务调用方法：python word2json.py --docx_path 'xxx.docx' --output_path 'xxx.json' --max_length 500")
+parser.add_argument("--docx_path", type=str, required=True, help="docx 文件地址")
+parser.add_argument("--output_path", type=str, required=True, help="结果输出地址")
+parser.add_argument("--max_length", default=500, type=int, help="切片大小")
+args = parser.parse_args()
+
+# 读取 DOCX 文件
+docx = Document(args.docx_path)
+max_length = args.max_length
+
+result = []
+current_text = ""
+num_toolong = 0
+
+for paragraph in docx.paragraphs:
+    section = paragraph.text.strip()
+    # 如果当前段落加上新段落的长度小于等于最大长度，或者当前文本为空
+    if not current_text or len(current_text) + len(section) + 1 <= max_length:
+        current_text += " " + section  # 添加空格作为分隔
+    else:
+        # 否则，将当前文本作为一个段落添加到结果中，并重新开始新的段落
+        result.append(current_text.strip())
+        if len(current_text) > max_length:
+            num_toolong += 1
+        current_text = section
+
+# 添加最后一段文字
+if current_text:
+    result.append(current_text.strip())
+
+# 检查输出目录是否存在，如果不存在，则创建
+output_dir = os.path.dirname(args.output_path)
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+# 将结果写入 JSON 文件
+with open(args.output_path, "w", encoding="utf-8") as file:
+    json.dump(result, file, ensure_ascii=False, indent=2)
+
+print("finish")
+```
 
 ### 3.2 构建ES检索库
 
@@ -510,11 +654,11 @@ es_index.py
 ```python
 # -*- coding: utf-8 -*-
 
-import os
+import json
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
 
-index_name = "audit_qa"
+index_name = "policy_qa"
 es = Elasticsearch(
     hosts=["http://127.0.0.1:9200"],
     basic_auth=("elastic", "your_password"),
@@ -535,18 +679,11 @@ CREATE_BODY = {
 }
 
 es.indices.create(index=index_name, body=CREATE_BODY)
-directory_path = "./preprocess_data"
 contents = []
 
-# 遍历目录下的文件
-for filename in os.listdir(directory_path):
-    # 确保文件是以txt为扩展名的文本文件
-    if filename.endswith(".txt"):
-        file_path = os.path.join(directory_path, filename)
-        # 读取文件内容并添加到列表中
-        with open(file_path, 'r', encoding='utf-8') as file:
-            file_content = file.read()
-            contents.append(file_content)
+with open("./preprocess_data/preprocess_data.json", "r", encoding="utf-8") as file:
+    temp = json.load(file)
+contents = contents + temp
 
 action = (
     {
@@ -802,4 +939,3 @@ if __name__ == '__main__':
 先执行 server.py 启动 ES 检索增强大模型生成服务，再执行 rag_test.py 进行测试。输出里会有个 history.json 文件，记录中间过程及结果。
 
 ![基于ES检索增强生成回答的效果](README.assets/基于ES检索增强生成回答的效果.png)
-
