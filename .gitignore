@@ -1,3 +1,4 @@
-.DS_Store
-.idea
-rag-code
+**/bge-large-zh-v1.5/
+**/.DS_Store
+**/.idea/
+**/__pycache__/
