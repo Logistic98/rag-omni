@@ -26,7 +26,7 @@ class BGEAlgorithm:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for item in data:
-                item['file_path'] = file_path
+                item['file_name'] = os.path.splitext(os.path.basename(file_path))[0] + '.docx'
                 data_list.append(item)
         return data_list
 
@@ -63,7 +63,7 @@ class BGEAlgorithm:
         score = score[0]
         results = [
             {
-                "file_name": os.path.basename(self.data_list[rank[i]]["file_path"]).replace('.json', '.docx'),
+                "file_name": self.data_list[rank[i]]["file_name"],
                 "part_content": self.data_list[rank[i]]["part_content"],
                 "score": float(score[i])
             }
