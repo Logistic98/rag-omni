@@ -1342,3 +1342,16 @@ if __name__ == "__main__":
 对应的history文件记录请求历史，里面包含了重构后的问题：
 
 ![RAG请求历史记录-含问题重构](README.assets/RAG请求历史记录-含问题重构.png)
+
+### 5.3 将RAG服务接入场景页面
+
+场景页面是使用 Vue 开发的，服务地址已经在 ./rag-omni/chat/src/App.vue 上进行对接了，如果要更换的话，直接在上面修改即可。
+
+```
+$ cd ./chat
+$ npm run serve
+```
+
+使用Chrome浏览器访问 `http://127.0.0.1:5003` 页面。
+
+![将RAG服务接入场景页面](README.assets/将RAG服务接入场景页面.png)
