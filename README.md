@@ -1046,8 +1046,8 @@ def get_bot_response():
 
     # 获取请求数据
     rule = {
-        "content": Rule(type=str, required=True),
-        "id": Rule(type=str, required=True)
+        "user_prompt": Rule(type=str, required=True),
+        "session_id": Rule(type=str, required=True)
     }
     try:
         params = pre.parse(rule=rule)
@@ -1059,15 +1059,15 @@ def get_bot_response():
         response.data = json.dumps(fail_response, ensure_ascii=False, indent=4)
         return response
 
-    userText = params["content"]
-    session_id = params["id"]
+    user_prompt = params["user_prompt"]
+    session_id = params["session_id"]
 
     # 获取对话历史，如果有的话
     if session_id in session_histories:
         history_obj = session_histories[session_id]["history"]
         session_histories[session_id]["last_access_time"] = time.time()
     else:
-        history_obj = History()
+        history_obj = History(session_id)
         session_histories[session_id] = {
             "history": history_obj,
             "last_access_time": time.time(),
@@ -1081,7 +1081,7 @@ def get_bot_response():
             del session_histories[sid]
 
     # 清空对话历史
-    if userText == "$清空对话历史":
+    if user_prompt == "$清空对话历史":
         history_obj.history = []
         success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data="已清空对话历史")
         logger.info(success_response)
@@ -1092,7 +1092,7 @@ def get_bot_response():
     # 获取知识库回答
     try:
         answer = get_knowledge_based_answer(
-            query=userText, history_obj=history_obj, url_retrieval=retrieval_url, llm=llm
+            query=user_prompt, history_obj=history_obj, url_retrieval=retrieval_url, llm=llm
         )
         success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data=answer)
         logger.info(success_response)
@@ -1148,12 +1148,21 @@ class LLMService:
             "messages": messages
         }
         response = requests.post(self.url, headers=self.headers, json=data)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        try:
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.JSONDecodeError as e:
+            logging.error(f"Error decoding JSON: {e}")
+            logging.error(f"Response content: {response.text}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error: {e}")
+            raise
 
 
 class History:
-    def __init__(self):
+    def __init__(self, session_id):
+        self.session_id = session_id
         self.history = []
 
 
@@ -1163,13 +1172,20 @@ def get_docs(question: str, url: str, top_k=RETRIEVAL_TOP_K, retries=3):
         try:
             response = requests.get(url, params=params)
             response.raise_for_status()
-            docs_response = response.json()
-            # 提取实际的文档数据
-            docs = [doc["part_content"] for doc in docs_response["data"]]
-            return docs
+            try:
+                docs_response = response.json()
+                # 提取实际的文档数据
+                docs = [doc["part_content"] for doc in docs_response["data"]]
+                return docs
+            except requests.exceptions.JSONDecodeError as e:
+                logging.error(f"Error decoding JSON: {e}")
+                logging.error(f"Response content: {response.text}")
+                if attempt < retries - 1:
+                    sleep(2 ** attempt)
+                else:
+                    raise
         except Exception as e:
             logging.error(f"Error in get_docs: {e}")
-            logging.error(f"Response content: {response.content.decode('utf-8')}")
             if attempt < retries - 1:
                 sleep(2 ** attempt)
             else:
@@ -1183,20 +1199,23 @@ def get_knowledge_based_answer(query, history_obj, url_retrieval, llm):
         history_obj.history = history_obj.history[-LLM_HISTORY_LEN:]
 
     # 重构问题
-    if len(history_obj.history):
+    if len(history_obj.history) > 0:
         rewrite_question_input = history_obj.history.copy()
         rewrite_question_input.append(
             {
                 "role": "user",
-                "content": f"""请基于对话历史，对后续问题进行补全重构，如果后续问题与历史相关，你必须结合语境将代词替换为相应的指代内容，让它的提问更加明确；否则直接返回原始的后续问题。
+                "content": f"""请基于对话历史，对后续问题进行补全重构。如果后续问题与历史相关，你必须结合语境将代词替换为相应的指代内容，让它的提问更加明确；否则直接返回原始的后续问题。
                 注意：请不要对后续问题做任何回答和解释。
 
+                历史对话：{json.dumps(history_obj.history, ensure_ascii=False)}
                 后续问题：{query}
 
                 修改后的后续问题："""
             }
         )
-        new_query = llm(rewrite_question_input)
+        new_query = llm(rewrite_question_input).strip()
+        if "请不要对后续问题做任何回答和解释" in new_query:
+            new_query = query
     else:
         new_query = query
 
@@ -1219,9 +1238,11 @@ def get_knowledge_based_answer(query, history_obj, url_retrieval, llm):
     history_obj.history[-1] = {"role": "user", "content": query}
     history_obj.history.append({"role": "assistant", "content": response})
 
-    # 指定history.json的路径
+    # 指定history.json的路径，包含session_id
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    history_file_path = os.path.join(current_dir, 'history.json')
+    history_dir = os.path.join(current_dir, 'history')
+    os.makedirs(history_dir, exist_ok=True)
+    history_file_path = os.path.join(history_dir, f'history_{history_obj.session_id}.json')
 
     # 检查history.json是否存在，如果不存在则创建
     if not os.path.exists(history_file_path):
@@ -1264,17 +1285,33 @@ $ python3 rag_server.py --api_url "http://127.0.0.1:5000/v1/chat/completions" --
 import requests
 import json
 
-url = "http://127.0.0.1:5002/api/rag/summary"
-headers = {
-    "Content-Type": "application/json"
-}
-data = {
-    "content": "总结一下国家对于地方政府性债务管理的意见",
-    "id": "session_id"
-}
 
-response = requests.post(url, headers=headers, data=json.dumps(data))
-print(response.json())
+def get_summary(url, user_prompt, session_id):
+    headers = {
+        "Content-Type": "application/json"
+    }
+    data = {
+        "user_prompt": user_prompt,
+        "session_id": session_id
+    }
+
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    return response.json()
+
+
+if __name__ == "__main__":
+    url = "http://127.0.0.1:5002/api/rag/summary"
+    session_id = "session_id_001"
+
+    user_prompt_1 = "简要总结一下国家对于地方政府性债务管理的意见"
+    response_1 = get_summary(url, user_prompt_1, session_id)
+    print("第一个问题的回复:")
+    print(response_1)
+
+    user_prompt_2 = "再详细一些"
+    response_2 = get_summary(url, user_prompt_2, session_id)
+    print("第二个问题的回复:")
+    print(response_2)
 ```
 
 输出结果里response为大模型总结的答案，docs是检索出来的相关文档，返回值格式如下：
@@ -1295,3 +1332,7 @@ print(response.json())
     }
 }
 ```
+
+对应的history文件记录请求历史，里面包含了重构后的问题：
+
+![RAG请求历史记录-含问题重构](README.assets/RAG请求历史记录-含问题重构.png)
