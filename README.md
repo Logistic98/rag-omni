@@ -772,7 +772,7 @@ class BGEAlgorithm:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for item in data:
-                item['file_path'] = file_path
+                item['file_name'] = os.path.splitext(os.path.basename(file_path))[0] + '.docx'
                 data_list.append(item)
         return data_list
 
@@ -809,7 +809,7 @@ class BGEAlgorithm:
         score = score[0]
         results = [
             {
-                "file_name": os.path.basename(self.data_list[rank[i]]["file_path"]).replace('.json', '.docx'),
+                "file_name": self.data_list[rank[i]]["file_name"],
                 "part_content": self.data_list[rank[i]]["part_content"],
                 "score": float(score[i])
             }
@@ -1003,6 +1003,7 @@ if __name__ == '__main__':
 import argparse
 import json
 import time
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from pre_request import Rule, pre
@@ -1083,10 +1084,15 @@ def get_bot_response():
     # 清空对话历史
     if user_prompt == "$清空对话历史":
         history_obj.history = []
+        history_file_path = f'./history/history_{session_id}.json'
+        if os.path.exists(history_file_path):
+            os.remove(history_file_path)
         success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data="已清空对话历史")
         logger.info(success_response)
         response = jsonify(success_response)
         response.data = json.dumps(success_response, ensure_ascii=False, indent=4)
+        if session_id in session_histories:
+            del session_histories[session_id]
         return response
 
     # 获取知识库回答
