@@ -120,16 +120,22 @@ BGE的技术亮点：
 ```
 .
 ├── README.md
-├── data
+├── data                  // 示例数据
 │   ├── convert_data           // 转换处理数据的脚本
 │   ├── original_data          // 原始文档数据
 │   └── preprocess_data        // 处理后的结构化数据
-├── llm
+├── balance               // 负载均衡
+│   ├── Dockerfile
+│   ├── build.sh               // 负载均衡的一键脚本
+│   ├── nginx.conf
+│   ├── nginx_balance.conf     // 负载均衡的核心脚本
+│   └── proxy.conf
+├── llm                   // 大模型服务
 │   ├── llm_server.py          // 部署本地大模型服务
 │   ├── llmtuner               // 部署本地大模型服务的核心代码
 │   ├── models                 // 存放本地大模型的模型文件
 │   └── test                   // 测试大模型服务的脚本
-├── retrieval
+├── retrieval            // 检索服务
 │   ├── bge_retrieval          // BGE检索算法的核心代码
 │   ├── bm25_retrieval         // BM25检索算法的核心代码
 │   ├── code.py
@@ -137,13 +143,20 @@ BGE的技术亮点：
 │   ├── response.py
 │   ├── retrieval_server.py    // 部署检索服务
 │   └── test                   // 测试检索服务的脚本
-└── rag         
-   ├── code.py
-   ├── log.py
-   ├── rag_server.py           // 部署RAG服务
-   ├── rag_solve.py            // RAG处理逻辑的核心代码
-   ├── response.py
-   └── test                    // 测试RAG服务的脚本
+├── rag                  // RAG服务
+│   ├── code.py
+│   ├── log.py
+│   ├── rag_server.py           // 部署RAG服务
+│   ├── rag_solve.py            // RAG处理逻辑的核心代码
+│   ├── response.py
+│   └── test                    // 测试RAG服务的脚本
+└── chat                 // RAG页面 
+    ├── babel.config.js
+    ├── jsconfig.json
+    ├── package.json
+    ├── public
+    ├── src                     // RAG页面的主要源码
+    └── vue.config.js
 ```
 
 ### 2.3 原始数据预处理
@@ -268,7 +281,9 @@ llm
 
 ### 3.2 部署大模型服务并进行测试
 
-Step1：下载Qwen1.5-0.5B大模型
+#### 3.2.1 下载基座大模型
+
+这里下载Qwen1.5-0.5B大模型
 
 models文件夹提供了 Qwen、Baichuan 模型的下载脚本（不仅限于这些，模型的支持情况详见 LLaMA-Factory 项目），这里使用 Qwen1.5-0.5B 进行实验。
 
@@ -295,7 +310,9 @@ if not os.path.exists(local_dir):
 snapshot_download(repo_id=repo_id, local_dir=local_dir)
 ```
 
-Step2：启动Qwen大模型服务
+#### 3.2.2 启动大模型服务
+
+启动Qwen大模型服务
 
 ```shell
 $ cd ./llm
@@ -489,9 +506,9 @@ class ModelArguments:
 
 ![开启vllm的大模型推理服务](README.assets/开启vllm的大模型推理服务.png)
 
-Step3：测试Qwen大模型服务
+#### 3.2.3 测试大模型服务
 
-执行 ./rag-omni/llm/test/llm_server_test.py 脚本即可进行测试。
+测试Qwen大模型服务，执行 ./rag-omni/llm/test/llm_server_test.py 脚本即可进行测试。
 
 ```python
 # -*- coding: utf-8 -*-
@@ -580,6 +597,52 @@ if __name__ == '__main__':
 注：执行 ./rag-omni/llm/test/llm_server_stress_test.py 脚本即可进行压力测试。
 
 ![大模型服务压力测试效果](README.assets/大模型服务压力测试效果.png)
+
+### 3.3 使用Nginx配置负载均衡
+
+需求情景：一台服务器上有多张显卡，用不同的显卡部署了多个大模型服务，现在想要进一步提高大模型服务的并发量，可以使用Nginx负载均衡来实现。
+
+- 有关Nginx负载均衡的内容这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
+
+这里假设启动了3个大模型服务，端口号分别是4997、4998、4999，现在想要将其都配置到5000端口上。修改以下配置文件，换成实际的服务地址，weight=1是权重，这里默认各服务为相同权重。
+
+./rag-omni/balance/nginx_balance.conf
+
+```ini
+upstream nginx_balance {
+        server 127.0.0.1:4999 weight=1;
+        server 127.0.0.1:4998 weight=1;
+        server 127.0.0.1:4997 weight=1;
+}
+server {
+    listen       5000;
+    server_name  127.0.0.1;
+    location ~* ^(/) {
+        gzip on;
+        gzip_vary on;
+	    gzip_min_length 1k;
+	    gzip_buffers 16 16k;
+        gzip_http_version 1.1;
+        gzip_comp_level 9;
+        gzip_types text/plain application/javascript application/x-javascript text/css text/xml text/javascript application/json;
+        proxy_pass http://nginx_balance;
+        client_max_body_size    48m;
+        include proxy.conf;
+    }
+}
+```
+
+./rag-omni/balance/build.sh
+
+```shell
+#!/bin/bash
+
+docker build -t 'nginx_balance_image' .
+docker run -itd --name nginx_balance -h nginx_balance -p 5000:5000 nginx_balance_image
+docker update nginx_balance --restart=always
+```
+
+给 build.sh 添加可执行权限，执行该脚本即可部署负载均衡。
 
 ## 4. 部署检索服务
 
@@ -1267,6 +1330,8 @@ def get_knowledge_based_answer(query, history_obj, url_retrieval, llm):
 
 ### 5.2 启动RAG服务并测试
 
+#### 5.2.1 两种方式启动RAG服务
+
 方式一：使用外部OpenAI服务启动
 
 ```
@@ -1282,6 +1347,8 @@ $ python3 rag_server.py --api_url "http://127.0.0.1:5000/v1/chat/completions" --
 ```
 
 注：如果是使用本地部署的大模型服务，因为没有权限验证，因此这里就不需要传 api_key 参数了。
+
+#### 5.2.2 测试RAG服务
 
 ./rag-omni/rag/test/rag_test.py 可用来测试RAG服务
 
