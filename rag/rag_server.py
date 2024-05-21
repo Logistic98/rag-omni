@@ -46,8 +46,8 @@ def get_bot_response():
 
     # 获取请求数据
     rule = {
-        "content": Rule(type=str, required=True),
-        "id": Rule(type=str, required=True)
+        "user_prompt": Rule(type=str, required=True),
+        "session_id": Rule(type=str, required=True)
     }
     try:
         params = pre.parse(rule=rule)
@@ -59,15 +59,15 @@ def get_bot_response():
         response.data = json.dumps(fail_response, ensure_ascii=False, indent=4)
         return response
 
-    userText = params["content"]
-    session_id = params["id"]
+    user_prompt = params["user_prompt"]
+    session_id = params["session_id"]
 
     # 获取对话历史，如果有的话
     if session_id in session_histories:
         history_obj = session_histories[session_id]["history"]
         session_histories[session_id]["last_access_time"] = time.time()
     else:
-        history_obj = History()
+        history_obj = History(session_id)
         session_histories[session_id] = {
             "history": history_obj,
             "last_access_time": time.time(),
@@ -81,7 +81,7 @@ def get_bot_response():
             del session_histories[sid]
 
     # 清空对话历史
-    if userText == "$清空对话历史":
+    if user_prompt == "$清空对话历史":
         history_obj.history = []
         success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data="已清空对话历史")
         logger.info(success_response)
@@ -92,7 +92,7 @@ def get_bot_response():
     # 获取知识库回答
     try:
         answer = get_knowledge_based_answer(
-            query=userText, history_obj=history_obj, url_retrieval=retrieval_url, llm=llm
+            query=user_prompt, history_obj=history_obj, url_retrieval=retrieval_url, llm=llm
         )
         success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data=answer)
         logger.info(success_response)
