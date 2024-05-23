@@ -1,117 +1,14 @@
-## 1. 检索增强生成
+## rag-omni
 
-### 1.1 RAG基本介绍
+## 1. 实例场景及服务器环境
 
-#### 1.1.1 RAG是什么
-
-开源的基座模型参数量不够大，本身拥有的能力有限。要完成复杂的知识密集型的任务，可以基于语言模型构建一个系统，通过访问外部知识源来做到。这样可以使生成的答案更可靠，有助于缓解“幻觉”问题。
-
-RAG 会接受输入并检索出一组相关/支撑的文档，并给出文档的来源。这些文档作为上下文和输入的原始提示词组合，送给文本生成器得到最终的输出。这样 RAG 更加适应事实会随时间变化的情况，这非常有用，因为 LLM 的参数化知识是静态的，RAG 让语言模型不用重新训练就能够获取最新的信息，基于检索生成产生可靠的输出。
-
-![RAG基本介绍](README.assets/RAG基本介绍.png)
-
-#### 1.1.2 RAG发展历程
-
-“RAG”概念由Lewis在2020年引入，其发展迅速，标志着研究旅程中的不同阶段。最初，这项研究旨在通过在预训练阶段为它们注入额外知识来增强语言模型。ChatGPT的推出引发了对利用大型模型进行深度上下文理解的高度兴趣，加速了RAG在推断阶段的发展。随着研究人员更深入地探索大型语言模型（LLMs）的能力，焦点转向提升他们的可控性和推理技巧以跟上日益增长的需求。GPT-4 的出现标志着一个重要里程碑，它革新了 RAG ，采取一种将其与微调技术相结合的新方法，并继续优化预训练策略。
-
-![RAG发展时间轴](README.assets/RAG发展时间轴.png)
-
-#### 1.1.3 RAG生态及挑战
-
-RAG的应用已不再局限于问答系统，其影响力正在扩展到更多领域。现在，诸如推荐系统、信息提取和报告生成等各种任务开始从RAG技术的应用中受益。与此同时，RAG技术栈正在经历一次繁荣。除了众所周知的工具如Langchain和LlamaIndex外，市场上也出现了更多针对性强的RAG工具，例如：为满足更专注场景需求而定制化的；为进一步降低入门门槛而简化使用的；以及功能专业化、逐渐面向生产环境目标发展的。
-
-RAG当前面临的挑战：
-
-- 上下文长度：当检索到的内容过多并超出窗口限制时该怎么办？如果LLMs的上下文窗口不再受限，应如何改进RAG？
-- 鲁棒性：如何处理检索到的错误内容？如何筛选和验证检索到的内容？如何增强模型对毒化和噪声的抵抗力？
-- 与微调协同工作：如何同时利用RAG和FT的效果，它们应该如何协调、组织，是串行、交替还是端对端？
-- 规模定律：RAG模型是否满足规模定律？会有什么情况下可能让RAG经历逆向规模定律现象呢？
-- 生产环境应用：如何减少超大规模语料库的检索延迟? 如何确保被 LLMS 检索出来的内容不会泄露?
-
-### 1.2 RAG技术实现
-
-#### 1.2.1 RAG技术范式
-
-在RAG的技术发展中，我们从技术范式的角度总结了其演变过程，主要分为以下几个阶段：
-
-- 初级RAG：初级RAG主要包括三个基本步骤：1）索引——将文档语料库切分成更短的片段，并通过编码器建立向量索引。2）检索——根据问题和片段之间的相似性检索相关文档片段。3）生成——依赖于检索到的上下文来生成对问题的回答。
-- 高级RAG：初级RAG在检索、生成和增强方面面临多重挑战。随后提出了高级RAG范式，涉及到预检索和后检索阶段额外处理。在检索之前，可以使用查询重写、路由以及扩展等方法来调整问题与文档片段之间语义差异。在检索之后，重新排列已获取到的文档语料库可以避免"迷失在中间"现象，或者可以过滤并压缩上下文以缩短窗口长度。
-- 模块化RAG：随着RAG技术进一步发展和演变，模块化RAG的概念诞生了。结构上，它更自由灵活，引入更具体功能模块如查询搜索引擎以及多答案融合。技术层面上，它将信息查找与微调、强化学习等技术集成起来。在流程方面，RAG模块设计并协同工作形成各种不同类型RAG。
-
-然而，模块化 RAG 并非突然出现，这三种范式存在继承与发展关系。高级RAG是模块化RAG的特殊情况，而初级RAG是高级RAG的特殊情况。
-
-![RAG技术范式](README.assets/RAG技术范式.png)
-
-#### 1.2.2 RAG基本流程
-
-基本流程概述：用户输入问题——>问题重构（补全指代信息，保证多轮对话的能力）——>从检索库检索答案——用LLM总结答案
-
-RAG 由两部分组成：
-
-- 第一部分负责在知识库中，根据 query 检索出匹配的文档。
-- 第二部分将 query 和文档拼接起来作为 QA 的 prompt，送入 seq2seq 模型，生成回复。
-
-![RAG原理](README.assets/RAG原理.png)
-
-#### 1.2.3 选择RAG还是微调
-
-除了RAG之外，LLMs的主要优化策略还包括提示工程和微调（FT）。每种都有其独特的特点。根据它们对外部知识的依赖性以及对模型调整的需求，每种都有适合的应用场景。
-
-![RAG与FT的比较](README.assets/RAG与FT的比较.jpg)
-
-RAG就像是给模型提供了一本定制信息检索的教科书，非常适合特定的查询。另一方面，FT就像一个学生随着时间内化知识，更适合模仿特定的结构、风格或格式。通过增强基础模型的知识、调整输出和教授复杂指令，FT可以提高模型的性能和效率。然而，它并不擅长整合新知识或快速迭代新用例。RAG和FT并不互斥，它们相辅相成，并且同时使用可能会产生最好的结果。
-
-![RAG与FT的关系](README.assets/RAG与FT的关系.png)
-
-#### 1.2.4 如何评价RAG的效果
-
-对RAG的评估方法多种多样，主要包括三个质量分数：上下文相关性、答案准确性和答案相关性。此外，评估还涉及四项关键能力：抗噪声能力、拒绝能力、信息整合以及反事实鲁棒性。这些评价维度将传统的定量指标与针对RAG特点的专门评估标准相结合，尽管这些标准尚未得到标准化。
-
-在评价框架方面，有RGB和RECALL等基准测试，以及像RAGAS、ARES和TruLens等自动化评价工具，它们帮助全面衡量RAG模型的表现。
-
-![如何评价RAG的效果](README.assets/如何评价RAG的效果.png)
-
-### 1.3 常见的信息检索算法
-
-稠密检索（Dense Retrieval, DR）一般指的是将documents编码为稠密向量（Dense Vector），这个如今一般都通过预训练模型的encoder进行完成，例如BERT或者T5等（GPT这种decoder架构的也可以做到）。随后基于向量数据库（如FAISS）等进行类似于K近邻的搜索方法，来查找与查询内容接近的高维文档向量。【需要的空间大，查询速度快】
-
-稀疏检索（Sparse Retrieval, SR）将文档投射到一个稀疏向量上，顾名思义，这个稀疏向量通常与文档的语言词汇一致，例如你的一篇文章，对每个词进行向量化，随后在词这个维度上进行执行你的检索策略。当然，这个传统的BM25或者TF-IDF也可以做到，但随着Transformer接管了这一领域，你会看到像 SPLADE 这样的方法，使用神经模型来推断与文档相关的词汇，即使这些词汇并不存在。这种方法的好处是，你可以离线处理文章中的词等细粒度的向量表示，从而大大加速检索的效率。【需要的空间小，查询速度慢】
-
-#### 1.3.1 BM25检索
-
-在信息检索领域，BM25算法被广泛认为是一种经典且有效的排名函数，用于估计文档与用户查询之间的相关性。BM25（Best Matching 25）是基于Okapi TF-IDF算法的改进版本，旨在解决一些Okapi算法存在的问题。BM25的核心思想是利用词频（TF）和逆文档频率（IDF）来衡量文档与查询之间的相关性，同时引入文档长度信息来进一步调整相关性的计算。
-
-- 词频（TF）：词频是衡量一个词在文档中重要性的基本指标。在BM25算法中，词频是通过计算查询中的词在文档中出现的频率来确定的。词频越高，这个词在文档中的重要性越大。
-- 逆文档频率（IDF）：逆文档频率用于衡量一个词在整个文档集合中的独特性或信息量。它是由整个文档集合中包含该词的文档数量决定的。一个词在很多文档中出现，其IDF值就会低，反之则高。这意味着罕见的词通常有更高的IDF值，从而在相关性评分中拥有更大的权重。
-- 文档长度：除了词频和逆文档频率，BM25还引入了文档长度信息来调整相关性的计算。较长的文档可能仅因为它们的长度就有更高的词频，因此需要用文档长度来调整词频的影响。
-
-![BM25算法公式解析](README.assets/BM25算法公式解析.png)
-
-#### 1.3.2 BGE检索
-
-智源研究院发布了一款开源的中英文语义向量模型BGE（BAAI General Embedding），在中英文语义检索精度与整体语义表征能力方面全面超越了OpenAI、Meta等同类模型。BGE模型的发布，标志着语义向量模型（Embedding Model）在搜索、推荐、数据挖掘等领域的应用迈入了一个新的阶段。
-
-- 项目地址：[https://github.com/FlagOpen/FlagEmbedding](https://github.com/FlagOpen/FlagEmbedding)
-- 论文地址：[https://arxiv.org/pdf/2309.07597](https://arxiv.org/pdf/2309.07597)
-
-BGE的技术亮点：
-
-- 高效预训练和大规模文本微调；
-- 在两个大规模语料集上采用了RetroMAE预训练算法，进一步增强了模型的语义表征能力；
-- 通过负采样和难负样例挖掘，增强了语义向量的判别力；
-- 借鉴Instruction Tuning的策略，增强了在多任务场景下的通用能力。
-
-<img src="README.assets/BGE向量检索与其他检索的对比.png" alt="BGE向量检索与其他检索的对比" style="zoom:180%;" />
-
-## 2. 实例场景及服务器环境
-
-### 2.1 服务器测试环境
+### 1.1 服务器测试环境
 
 实验环境：实体GPU服务器，NVIDIA RTX 4090 / 24GB，CentOS 7.9，Anaconda3-2019.03，CUDA 12.4
 
 如果没有GPU服务器，可以租用AutoDL等平台的。服务器的租用及基础环节的安装这里就不赘述了，详见我的另一篇博客：[常用深度学习平台的使用指南](https://www.eula.club/blogs/常用深度学习平台的使用指南.html)
 
-### 2.2 实例场景及源码
+### 1.2 实例场景及源码
 
 实例场景概述：有一批内部的政府政策文档，数据不可外传，使用自部署的大模型来实现，需要基于这些文档进行垂直领域的问答。
 
@@ -120,16 +17,22 @@ BGE的技术亮点：
 ```
 .
 ├── README.md
-├── data
+├── data                  // 示例数据
 │   ├── convert_data           // 转换处理数据的脚本
 │   ├── original_data          // 原始文档数据
 │   └── preprocess_data        // 处理后的结构化数据
-├── llm
+├── balance               // 负载均衡
+│   ├── Dockerfile
+│   ├── build.sh               // 负载均衡的一键脚本
+│   ├── nginx.conf
+│   ├── nginx_balance.conf     // 负载均衡的核心脚本
+│   └── proxy.conf
+├── llm                   // 大模型服务
 │   ├── llm_server.py          // 部署本地大模型服务
 │   ├── llmtuner               // 部署本地大模型服务的核心代码
 │   ├── models                 // 存放本地大模型的模型文件
 │   └── test                   // 测试大模型服务的脚本
-├── retrieval
+├── retrieval            // 检索服务
 │   ├── bge_retrieval          // BGE检索算法的核心代码
 │   ├── bm25_retrieval         // BM25检索算法的核心代码
 │   ├── code.py
@@ -137,18 +40,25 @@ BGE的技术亮点：
 │   ├── response.py
 │   ├── retrieval_server.py    // 部署检索服务
 │   └── test                   // 测试检索服务的脚本
-└── rag         
-   ├── code.py
-   ├── log.py
-   ├── rag_server.py           // 部署RAG服务
-   ├── rag_solve.py            // RAG处理逻辑的核心代码
-   ├── response.py
-   └── test                    // 测试RAG服务的脚本
+├── rag                  // RAG服务
+│   ├── code.py
+│   ├── log.py
+│   ├── rag_server.py           // 部署RAG服务
+│   ├── rag_solve.py            // RAG处理逻辑的核心代码
+│   ├── response.py
+│   └── test                    // 测试RAG服务的脚本
+└── chat                 // RAG页面 
+    ├── babel.config.js
+    ├── jsconfig.json
+    ├── package.json
+    ├── public
+    ├── src                     // RAG页面的主要源码
+    └── vue.config.js
 ```
 
-### 2.3 原始数据预处理
+### 1.3 原始数据预处理
 
-#### 2.3.1 数据预处理要求
+#### 1.3.1 数据预处理要求
 
 数据预处理：需要将数据预处理成结构化数据之后，才能方便的构建检索库。
 
@@ -157,7 +67,7 @@ BGE的技术亮点：
 
 ![用于RAG的结构化数据](README.assets/用于RAG的结构化数据.png)
 
-#### 2.3.2 数据预处理脚本
+#### 1.3.2 数据预处理脚本
 
 PDF格式是非常难处理的，如果是文本类型的可以使用以下脚本来初步处理，如果本身就是图片类型的，那该脚本解析不了，就需要OCR技术来辅助了。关于复杂PDF文件的解析可以使用 Marker 库，详见我的另一篇博客：[PDF解析与基于LLM的本地知识库问答](https://www.eula.club/blogs/PDF解析与基于LLM的本地知识库问答.html)
 
@@ -238,11 +148,11 @@ with open(args.output_path, "w", encoding="utf-8") as file:
 print(f"{args.docx_path} 处理完成")
 ```
 
-## 3. 部署大模型服务
+## 2. 部署大模型服务
 
 后面的检索服务和RAG服务，对接了 OpenAI 风格的 API，可以使用任意符合该格式的服务。如果有数据保密、本地化部署的需求，可以使用本地化部署的大模型服务。如果直接使用外部的API，本节可跳过。
 
-### 3.1 LLaMA-Factory的推理服务
+### 2.1 LLaMA-Factory的推理服务
 
 这里用了 [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) 项目的 /src/llmtuner 部分，它支持了 vLLM，对推理进行了加速，本项目代码里用的版本需要要求 vllm==0.4.0 版本。
 
@@ -266,9 +176,11 @@ llm
 
 注：开启vLLM可以充分利用显卡计算资源，带来更好的推理性能，详见我的另一篇博客：[基于vLLM加速大模型推理服务](https://www.eula.club/blogs/基于vLLM加速大模型推理服务.html)
 
-### 3.2 部署大模型服务并进行测试
+### 2.2 部署大模型服务并进行测试
 
-Step1：下载Qwen1.5-0.5B大模型
+#### 2.2.1 下载基座大模型
+
+这里下载Qwen1.5-0.5B大模型
 
 models文件夹提供了 Qwen、Baichuan 模型的下载脚本（不仅限于这些，模型的支持情况详见 LLaMA-Factory 项目），这里使用 Qwen1.5-0.5B 进行实验。
 
@@ -295,7 +207,9 @@ if not os.path.exists(local_dir):
 snapshot_download(repo_id=repo_id, local_dir=local_dir)
 ```
 
-Step2：启动Qwen大模型服务
+#### 2.2.2 启动大模型服务
+
+启动Qwen大模型服务
 
 ```shell
 $ cd ./llm
@@ -308,178 +222,7 @@ $ CUDA_VISIBLE_DEVICES=0 python3 llm_server.py \
 
 注：vllm_gpu_util 参数用于控制显存占用比例，默认值为0.9，详见 ./rag-omni/llm/llmtuner/hparams/model_args.py
 
-```python
-class ModelArguments:
-    r"""
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune or infer.
-    """
-
-    model_name_or_path: str = field(
-        metadata={
-            "help": "Path to the model weight or identifier from huggingface.co/models or modelscope.cn/models."
-        },
-    )
-    adapter_name_or_path: Optional[str] = field(
-        default=None,
-        metadata={"help": "Path to the adapter weight or identifier from huggingface.co/models."},
-    )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where to store the pre-trained models downloaded from huggingface.co or modelscope.cn."},
-    )
-    use_fast_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether or not to use one of the fast tokenizer (backed by the tokenizers library)."},
-    )
-    resize_vocab: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to resize the tokenizer vocab and the embedding layers."},
-    )
-    split_special_tokens: bool = field(
-        default=False,
-        metadata={"help": "Whether or not the special tokens should be split during the tokenization process."},
-    )
-    new_special_tokens: Optional[str] = field(
-        default=None,
-        metadata={"help": "Special tokens to be added into the tokenizer."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    low_cpu_mem_usage: bool = field(
-        default=True,
-        metadata={"help": "Whether or not to use memory-efficient model loading."},
-    )
-    quantization_bit: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of bits to quantize the model using bitsandbytes."},
-    )
-    quantization_type: Literal["fp4", "nf4"] = field(
-        default="nf4",
-        metadata={"help": "Quantization data type to use in int4 training."},
-    )
-    double_quantization: bool = field(
-        default=True,
-        metadata={"help": "Whether or not to use double quantization in int4 training."},
-    )
-    quantization_device_map: Optional[Literal["auto"]] = field(
-        default=None,
-        metadata={"help": "Device map used to infer the 4-bit quantized model, needs bitsandbytes>=0.43.0."},
-    )
-    rope_scaling: Optional[Literal["linear", "dynamic"]] = field(
-        default=None,
-        metadata={"help": "Which scaling strategy should be adopted for the RoPE embeddings."},
-    )
-    flash_attn: Literal["off", "sdpa", "fa2", "auto"] = field(
-        default="auto",
-        metadata={"help": "Enable FlashAttention for faster training and inference."},
-    )
-    shift_attn: bool = field(
-        default=False,
-        metadata={"help": "Enable shift short attention (S^2-Attn) proposed by LongLoRA."},
-    )
-    mixture_of_depths: Optional[Literal["convert", "load"]] = field(
-        default=None,
-        metadata={"help": "Convert the model to mixture-of-depths (MoD) or load the MoD model."},
-    )
-    use_unsloth: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to use unsloth's optimization for the LoRA training."},
-    )
-    visual_inputs: bool = field(
-        default=False,
-        metadata={"help": "Whethor or not to use multimodal LLM that accepts visual inputs."},
-    )
-    moe_aux_loss_coef: Optional[float] = field(
-        default=None,
-        metadata={"help": "Coefficient of the auxiliary router loss in mixture-of-experts model."},
-    )
-    disable_gradient_checkpointing: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to disable gradient checkpointing."},
-    )
-    upcast_layernorm: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to upcast the layernorm weights in fp32."},
-    )
-    upcast_lmhead_output: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to upcast the output of lm_head in fp32."},
-    )
-    infer_backend: Literal["huggingface", "vllm"] = field(
-        default="huggingface",
-        metadata={"help": "Backend engine used at inference."},
-    )
-    vllm_maxlen: int = field(
-        default=2048,
-        metadata={"help": "Maximum input length of the vLLM engine."},
-    )
-    vllm_gpu_util: float = field(
-        default=0.9,
-        metadata={"help": "The fraction of GPU memory in (0,1) to be used for the vLLM engine."},
-    )
-    vllm_enforce_eager: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to disable CUDA graph in the vLLM engine."},
-    )
-    offload_folder: str = field(
-        default="offload",
-        metadata={"help": "Path to offload model weights."},
-    )
-    use_cache: bool = field(
-        default=True,
-        metadata={"help": "Whether or not to use KV cache in generation."},
-    )
-    hf_hub_token: Optional[str] = field(
-        default=None,
-        metadata={"help": "Auth token to log in with Hugging Face Hub."},
-    )
-    ms_hub_token: Optional[str] = field(
-        default=None,
-        metadata={"help": "Auth token to log in with ModelScope Hub."},
-    )
-    export_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Path to the directory to save the exported model."},
-    )
-    export_size: int = field(
-        default=1,
-        metadata={"help": "The file shard size (in GB) of the exported model."},
-    )
-    export_device: str = field(
-        default="cpu",
-        metadata={"help": "The device used in model export, use cuda to avoid addmm errors."},
-    )
-    export_quantization_bit: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of bits to quantize the exported model."},
-    )
-    export_quantization_dataset: Optional[str] = field(
-        default=None,
-        metadata={"help": "Path to the dataset or dataset name to use in quantizing the exported model."},
-    )
-    export_quantization_nsamples: int = field(
-        default=128,
-        metadata={"help": "The number of samples used for quantization."},
-    )
-    export_quantization_maxlen: int = field(
-        default=1024,
-        metadata={"help": "The maximum length of the model inputs used for quantization."},
-    )
-    export_legacy_format: bool = field(
-        default=False,
-        metadata={"help": "Whether or not to save the `.bin` files instead of `.safetensors`."},
-    )
-    export_hub_model_id: Optional[str] = field(
-        default=None,
-        metadata={"help": "The name of the repository if push the model to the Hugging Face hub."},
-    )
-    print_param_status: bool = field(
-        default=False,
-        metadata={"help": "For debugging purposes, print the status of the parameters in the model."},
-    )
-```
+![vllm_gpu_util参数支持](README.assets/vllm_gpu_util参数支持.png)
 
 不同vllm_gpu_util参数设置的显存占用对比：
 
@@ -489,9 +232,9 @@ class ModelArguments:
 
 ![开启vllm的大模型推理服务](README.assets/开启vllm的大模型推理服务.png)
 
-Step3：测试Qwen大模型服务
+#### 2.2.3 测试大模型服务
 
-执行 ./rag-omni/llm/test/llm_server_test.py 脚本即可进行测试。
+测试Qwen大模型服务，执行 ./rag-omni/llm/test/llm_server_test.py 脚本即可进行测试。
 
 ```python
 # -*- coding: utf-8 -*-
@@ -581,11 +324,57 @@ if __name__ == '__main__':
 
 ![大模型服务压力测试效果](README.assets/大模型服务压力测试效果.png)
 
-## 4. 部署检索服务
+### 2.3 使用Nginx配置负载均衡
 
-### 4.1 检索算法的实现
+需求情景：一台服务器上有多张显卡，用不同的显卡部署了多个大模型服务，现在想要进一步提高大模型服务的并发量，可以使用Nginx负载均衡来实现。
 
-#### 4.1.1 BM25检索算法
+- 有关Nginx负载均衡的内容这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
+
+这里假设启动了3个大模型服务，端口号分别是4997、4998、4999，现在想要将其都配置到5000端口上。修改以下配置文件，换成实际的服务地址，weight=1是权重，这里默认各服务为相同权重。
+
+./rag-omni/balance/nginx_balance.conf
+
+```ini
+upstream nginx_balance {
+        server 127.0.0.1:4999 weight=1;
+        server 127.0.0.1:4998 weight=1;
+        server 127.0.0.1:4997 weight=1;
+}
+server {
+    listen       5000;
+    server_name  127.0.0.1;
+    location ~* ^(/) {
+        gzip on;
+        gzip_vary on;
+	    gzip_min_length 1k;
+	    gzip_buffers 16 16k;
+        gzip_http_version 1.1;
+        gzip_comp_level 9;
+        gzip_types text/plain application/javascript application/x-javascript text/css text/xml text/javascript application/json;
+        proxy_pass http://nginx_balance;
+        client_max_body_size    48m;
+        include proxy.conf;
+    }
+}
+```
+
+./rag-omni/balance/build.sh
+
+```shell
+#!/bin/bash
+
+docker build -t 'nginx_balance_image' .
+docker run -itd --name nginx_balance -h nginx_balance -p 5000:5000 nginx_balance_image
+docker update nginx_balance --restart=always
+```
+
+给 build.sh 添加可执行权限，执行该脚本即可部署负载均衡。
+
+## 3. 部署检索服务
+
+### 3.1 检索算法的实现
+
+#### 3.1.1 BM25检索算法
 
 BM25算法较为简单，这里就直接实现了。没将索引文件持久化，直接就加载内存里了。除此之外，BM25为ES默认的相关性排序算法，也可以借助ES去实现。
 
@@ -737,7 +526,7 @@ if __name__ == '__main__':
 
 注：代码中会用到 stop_words.txt 文件，已经放到项目里了，这里就不展示了。
 
-#### 4.1.2 BGE检索算法
+#### 3.1.2 BGE检索算法
 
 BGE向量检索需要下载 BAAI/bge-large-zh-v1.5 模型文件，项目里提供了模型下载脚本。没将索引文件持久化，直接就加载内存里了。
 
@@ -863,9 +652,9 @@ if __name__ == '__main__':
     download_and_save_model(model_name, save_directory)
 ```
 
-### 4.2 部署检索服务
+### 3.2 部署检索服务
 
-#### 4.2.1 封装检索服务
+#### 3.2.1 封装检索服务
 
 这里使用 Flask 框架将 BM25、BGE检索算法封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入知识库文件路径（json_files）、检索算法（algorithm）、服务端口号（port），/api/rag/retrieval 接口入参接受输入问题（question）和检索条数（top_k）。
 
@@ -957,7 +746,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 ```
 
-#### 4.2.2 启动检索服务并测试
+#### 3.2.2 启动检索服务并测试
 
 启动检索服务，这里以BM25算法为例，如果要使用 BGE 算法，则修改 --algorithm 传参为 BGE 即可。
 
@@ -989,11 +778,167 @@ if __name__ == '__main__':
 
 ![BM25检索算法的返回值](README.assets/BM25检索算法的返回值.png)
 
-## 5. 部署RAG服务
+## 4. 部署RAG服务
 
-### 5.1 封装RAG服务
+### 4.1 RAG服务的实现
 
-这里使用 Flask 框架将RAG封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入大模型服务地址（api_url）、大模型服务密钥（api_key）、大模型型号（model）、服务端口号（port）、检索服务地址（retrieval_url），/api/rag/summary 接口入参接受输入问题（content）和检索标识（id）。
+#### 4.1.1 RAG服务核心逻辑
+
+核心逻辑：用户输入的问题——>问题重构（根据历史对话补全信息得到新的问题）——>文档检索（用重构后的问题从检索库里搜索相关文档）——>给出大模型总结的答案（如果检索出来的文档与问题相关，则使用大模型根据相关文档进行总结；如果检索出来的文档与问题无关，则直接使用大模型进行回复并给出提示）
+
+./rag-omni/rag/rag_solve.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import requests
+import json
+import os
+import logging
+from time import sleep
+
+# 全局参数
+RETRIEVAL_TOP_K = 5
+LLM_HISTORY_LEN = 30
+UNRELATED_RESPONSE = "很抱歉，检索库内不存在与问题相关的参考材料，以下是大模型直接生成的结果："
+
+logging.basicConfig(level=logging.INFO)
+
+
+class LLMService:
+    def __init__(self, url, api_key, model):
+        self.url = url
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        self.model = model
+
+    def __call__(self, messages: list) -> str:
+        data = {
+            "model": self.model,
+            "messages": messages
+        }
+        response = requests.post(self.url, headers=self.headers, json=data)
+        try:
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.JSONDecodeError as e:
+            logging.error(f"Error decoding JSON: {e}")
+            logging.error(f"Response content: {response.text}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error: {e}")
+            raise
+
+
+class History:
+    def __init__(self, session_id):
+        self.session_id = session_id
+        self.history = []
+
+
+def get_docs(question: str, url: str, top_k=RETRIEVAL_TOP_K, retries=3):
+    params = {"question": question, "top_k": top_k}
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            try:
+                docs_response = response.json()
+                docs = [doc["part_content"] for doc in docs_response["data"]]
+                return docs
+            except requests.exceptions.JSONDecodeError as e:
+                logging.error(f"Error decoding JSON: {e}")
+                logging.error(f"Response content: {response.text}")
+                if attempt < retries - 1:
+                    sleep(2 ** attempt)
+                else:
+                    raise
+        except Exception as e:
+            logging.error(f"Error in get_docs: {e}")
+            if attempt < retries - 1:
+                sleep(2 ** attempt)
+            else:
+                raise
+
+
+def get_knowledge_based_answer(query, history_obj, url_retrieval, llm):
+    global RETRIEVAL_TOP_K, UNRELATED_RESPONSE
+
+    if len(history_obj.history) > LLM_HISTORY_LEN:
+        history_obj.history = history_obj.history[-LLM_HISTORY_LEN:]
+
+    # 重构问题
+    if len(history_obj.history) > 0:
+        rewrite_question_input = history_obj.history.copy()
+        rewrite_question_input.append(
+            {
+                "role": "user",
+                "content": f"""请基于对话历史，对后续问题进行补全重构。如果后续问题与历史相关，你必须结合语境将代词替换为相应的指代内容，让它的提问更加明确；否则直接返回原始的后续问题。
+                注意：请不要对后续问题做任何回答和解释。
+
+                历史对话：{json.dumps(history_obj.history, ensure_ascii=False)}
+                后续问题：{query}
+
+                修改后的后续问题："""
+            }
+        )
+        new_query = llm(rewrite_question_input).strip()
+        if "请不要对后续问题做任何回答和解释" in new_query:
+            new_query = query
+    else:
+        new_query = query
+
+    # 获取相关文档
+    docs = get_docs(new_query, url_retrieval, RETRIEVAL_TOP_K)
+    doc_string = "\n".join([json.dumps(doc, ensure_ascii=False) for doc in docs])
+
+    # 判断文档与重构后的问题是否相关
+    relevance_check_input = [
+        {"role": "system", "content": "你是一个帮助判断内容是否相关的助手。"},
+        {"role": "user", "content": f"问题：{new_query}\n文档：{doc_string}\n请判断这些文档是否与问题相关，如果相关，请返回'相关'，否则返回'无关'。"}
+    ]
+    relevance_response = llm(relevance_check_input).strip()
+
+    if "无关" in relevance_response:
+        # 使用重构的问题调用大模型
+        direct_response_input = [{"role": "user", "content": new_query}]
+        direct_response = llm(direct_response_input)
+        response = f"{UNRELATED_RESPONSE}\n\n{direct_response}"
+    else:
+        history_obj.history.append(
+            {
+                "role": "user",
+                "content": f"请基于参考，回答问题，并给出参考依据：\n问题：\n{query}\n参考：\n{doc_string}\n答案："
+            }
+        )
+        response = llm(history_obj.history)
+        history_obj.history[-1] = {"role": "user", "content": query}
+        history_obj.history.append({"role": "assistant", "content": response})
+
+    # 保存history
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    history_dir = os.path.join(current_dir, 'history')
+    os.makedirs(history_dir, exist_ok=True)
+    history_file_path = os.path.join(history_dir, f'history_{history_obj.session_id}.json')
+
+    if not os.path.exists(history_file_path):
+        with open(history_file_path, "w", encoding="utf-8") as file:
+            json.dump([], file, ensure_ascii=False, indent=2)
+
+    with open(history_file_path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+    data.append({"query": query, "new_query": new_query, "docs": docs, "response": response})
+    with open(history_file_path, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+
+    return {"response": response, "docs": docs}
+```
+
+#### 4.1.2 封装RAG服务
+
+使用 Flask 框架将RAG封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入大模型服务地址（api_url）、大模型服务密钥（api_key）、大模型型号（model）、服务端口号（port）、检索服务地址（retrieval_url），/api/rag/summary 接口入参接受输入问题（content）和检索标识（id）。
 
 ./rag-omni/rag/rag_server.py
 
@@ -1121,151 +1066,9 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 ```
 
-./rag-omni/rag/rag_solve.py
+### 4.2 启动RAG服务并测试
 
-```python
-# -*- coding: utf-8 -*-
-
-import requests
-import json
-import os
-import logging
-from time import sleep
-
-# 全局参数
-RETRIEVAL_TOP_K = 5
-LLM_HISTORY_LEN = 30
-
-logging.basicConfig(level=logging.INFO)
-
-
-class LLMService:
-    def __init__(self, url, api_key, model):
-        self.url = url
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        self.model = model
-
-    def __call__(self, messages: list) -> str:
-        data = {
-            "model": self.model,
-            "messages": messages
-        }
-        response = requests.post(self.url, headers=self.headers, json=data)
-        try:
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except requests.exceptions.JSONDecodeError as e:
-            logging.error(f"Error decoding JSON: {e}")
-            logging.error(f"Response content: {response.text}")
-            raise
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Request error: {e}")
-            raise
-
-
-class History:
-    def __init__(self, session_id):
-        self.session_id = session_id
-        self.history = []
-
-
-def get_docs(question: str, url: str, top_k=RETRIEVAL_TOP_K, retries=3):
-    params = {"question": question, "top_k": top_k}
-    for attempt in range(retries):
-        try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            try:
-                docs_response = response.json()
-                # 提取实际的文档数据
-                docs = [doc["part_content"] for doc in docs_response["data"]]
-                return docs
-            except requests.exceptions.JSONDecodeError as e:
-                logging.error(f"Error decoding JSON: {e}")
-                logging.error(f"Response content: {response.text}")
-                if attempt < retries - 1:
-                    sleep(2 ** attempt)
-                else:
-                    raise
-        except Exception as e:
-            logging.error(f"Error in get_docs: {e}")
-            if attempt < retries - 1:
-                sleep(2 ** attempt)
-            else:
-                raise
-
-
-def get_knowledge_based_answer(query, history_obj, url_retrieval, llm):
-    global RETRIEVAL_TOP_K
-
-    if len(history_obj.history) > LLM_HISTORY_LEN:
-        history_obj.history = history_obj.history[-LLM_HISTORY_LEN:]
-
-    # 重构问题
-    if len(history_obj.history) > 0:
-        rewrite_question_input = history_obj.history.copy()
-        rewrite_question_input.append(
-            {
-                "role": "user",
-                "content": f"""请基于对话历史，对后续问题进行补全重构。如果后续问题与历史相关，你必须结合语境将代词替换为相应的指代内容，让它的提问更加明确；否则直接返回原始的后续问题。
-                注意：请不要对后续问题做任何回答和解释。
-
-                历史对话：{json.dumps(history_obj.history, ensure_ascii=False)}
-                后续问题：{query}
-
-                修改后的后续问题："""
-            }
-        )
-        new_query = llm(rewrite_question_input).strip()
-        if "请不要对后续问题做任何回答和解释" in new_query:
-            new_query = query
-    else:
-        new_query = query
-
-    # 获取相关文档
-    docs = get_docs(new_query, url_retrieval, RETRIEVAL_TOP_K)
-    doc_string = ""
-    for i, doc in enumerate(docs):
-        doc_string = doc_string + json.dumps(doc, ensure_ascii=False) + "\n"
-    history_obj.history.append(
-        {
-            "role": "user",
-            "content": f"请基于参考，回答问题，并给出参考依据：\n问题：\n{query}\n参考：\n{doc_string}\n答案："
-        }
-    )
-
-    # 调用大模型获取回复
-    response = llm(history_obj.history)
-
-    # 修改history，将之前的参考资料从history删除，避免history太长
-    history_obj.history[-1] = {"role": "user", "content": query}
-    history_obj.history.append({"role": "assistant", "content": response})
-
-    # 指定history.json的路径，包含session_id
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    history_dir = os.path.join(current_dir, 'history')
-    os.makedirs(history_dir, exist_ok=True)
-    history_file_path = os.path.join(history_dir, f'history_{history_obj.session_id}.json')
-
-    # 检查history.json是否存在，如果不存在则创建
-    if not os.path.exists(history_file_path):
-        with open(history_file_path, "w", encoding="utf-8") as file:
-            json.dump([], file, ensure_ascii=False, indent=2)
-
-    # 读取现有数据，追加新数据，并写回文件
-    with open(history_file_path, "r", encoding="utf-8") as file:
-        data = json.load(file)
-    data.append({"query": query, "new_query": new_query, "docs": docs, "response": response})
-    with open(history_file_path, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
-
-    return {"response": response, "docs": docs}
-```
-
-### 5.2 启动RAG服务并测试
+#### 4.2.1 两种方式启动RAG服务
 
 方式一：使用外部OpenAI服务启动
 
@@ -1282,6 +1085,8 @@ $ python3 rag_server.py --api_url "http://127.0.0.1:5000/v1/chat/completions" --
 ```
 
 注：如果是使用本地部署的大模型服务，因为没有权限验证，因此这里就不需要传 api_key 参数了。
+
+#### 4.2.2 测试RAG服务
 
 ./rag-omni/rag/test/rag_test.py 可用来测试RAG服务
 
@@ -1342,3 +1147,16 @@ if __name__ == "__main__":
 对应的history文件记录请求历史，里面包含了重构后的问题：
 
 ![RAG请求历史记录-含问题重构](README.assets/RAG请求历史记录-含问题重构.png)
+
+### 4.3 将RAG服务接入场景页面
+
+场景页面是使用 Vue 开发的，服务地址已经在 ./rag-omni/chat/src/App.vue 上进行对接了，如果要更换的话，直接在上面修改即可。
+
+```
+$ cd ./chat
+$ npm run serve
+```
+
+使用Chrome浏览器访问 `http://127.0.0.1:5003` 页面。
+
+![将RAG服务接入场景页面](README.assets/将RAG服务接入场景页面.png)
