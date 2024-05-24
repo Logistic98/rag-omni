@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import math
 import os
 import jieba
 import logging
@@ -27,68 +26,29 @@ class BM25Param(object):
 
 
 class BM25Algorithm(object):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    _stop_words_path = os.path.join(current_dir, 'stop_words.txt')
-    _stop_words = []
-
-    def __init__(self, file_paths):
-        self.file_paths = file_paths
+    def __init__(self, index_path):
+        self.index_path = index_path
         self.param: BM25Param = self._load_param()
+        self._stop_words = self._load_stop_words()
 
     def _load_stop_words(self):
-        if not os.path.exists(self._stop_words_path):
-            raise Exception(f"system stop words: {self._stop_words_path} not found")
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        stop_words_path = os.path.join(current_dir, 'stop_words.txt')
+        if not os.path.exists(stop_words_path):
+            raise Exception(f"system stop words: {stop_words_path} not found")
         stop_words = []
-        with open(self._stop_words_path, 'r', encoding='utf8') as reader:
+        with open(stop_words_path, 'r', encoding='utf8') as reader:
             for line in reader:
                 line = line.strip()
                 stop_words.append(line)
         return stop_words
 
-    def _build_param(self):
-        def _cal_param(docs_data):
-            f = []
-            df = {}
-            idf = {}
-            length = len(docs_data)
-            words_count = 0
-            docs_list = []
-            line_length_list = []
-            for doc in docs_data:
-                content = doc.get("part_content", "").strip()
-                if not content:
-                    continue
-                words = [word for word in jieba.lcut(content) if word and word not in self._stop_words]
-                line_length_list.append(len(words))
-                docs_list.append(doc)
-                words_count += len(words)
-                tmp_dict = {}
-                for word in words:
-                    tmp_dict[word] = tmp_dict.get(word, 0) + 1
-                f.append(tmp_dict)
-                for word in tmp_dict.keys():
-                    df[word] = df.get(word, 0) + 1
-            for word, num in df.items():
-                idf[word] = math.log((length - num + 0.5) / (num + 0.5) + 1)
-            param = BM25Param(f, df, idf, length, words_count / length, docs_list, line_length_list)
-            return param
-
-        docs_data = []
-        for file_path in self.file_paths:
-            if not os.path.exists(file_path):
-                raise Exception(f"input docs {file_path} not found")
-            with open(file_path, 'r', encoding='utf8') as reader:
-                docs = json.load(reader)
-                for doc in docs:
-                    doc["file_path"] = file_path
-                docs_data.extend(docs)
-
-        param = _cal_param(docs_data)
-        return param
-
     def _load_param(self):
-        self._stop_words = self._load_stop_words()
-        param = self._build_param()
+        if not os.path.exists(self.index_path):
+            raise Exception(f"Index file {self.index_path} not found")
+        with open(self.index_path, 'r', encoding='utf8') as f:
+            data = json.load(f)
+            param = BM25Param(**data)
         return param
 
     def _cal_similarity(self, words, index):
@@ -130,11 +90,8 @@ class BM25Algorithm(object):
 
 
 if __name__ == '__main__':
-    file_paths = [
-        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json",
-        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
-    ]
-    bm25 = BM25Algorithm(file_paths)
+    index_path = "./index/bm25_index.json"
+    bm25 = BM25Algorithm(index_path)
     query_content = "国务院对于地方政府性债务管理的意见"
     top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
     result = bm25.search(query_content, top_k)
