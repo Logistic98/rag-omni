@@ -650,15 +650,15 @@ class BM25Algorithm(object):
         if top_k != -1:
             score_list = score_list[:top_k]
 
-        formatted_result = [
+        result = [
             {
-                "file_name": os.path.basename(doc["file_path"]).replace('.json', '.docx'),
+                "file_name": doc["file_name"],
                 "part_content": doc["part_content"],
                 "score": score
             }
             for doc, score in score_list
         ]
-        return formatted_result
+        return result
 
 
 if __name__ == '__main__':
