@@ -33,11 +33,12 @@
 │   ├── models                 // 存放本地大模型的模型文件
 │   └── test                   // 测试大模型服务的脚本
 ├── retrieval            // 检索服务
-│   ├── bge_retrieval          // BGE检索算法的核心代码
-│   ├── bm25_retrieval         // BM25检索算法的核心代码
+│   ├── bge                    // BGE检索算法的核心代码
+│   ├── bm25                   // BM25检索算法的核心代码
 │   ├── code.py
 │   ├── log.py
 │   ├── response.py
+│   ├── retrieval_index.py     // 构建索引文件的脚本
 │   ├── retrieval_server.py    // 部署检索服务
 │   └── test                   // 测试检索服务的脚本
 ├── rag                  // RAG服务
@@ -372,13 +373,41 @@ docker update nginx_balance --restart=always
 
 ## 3. 部署检索服务
 
-### 3.1 检索算法的实现
+### 3.1 源码结构概述
 
-#### 3.1.1 BM25检索算法
+构建检索服务分为两步，先使用知识文件构建索引，再使用索引构建检索服务。
 
-BM25算法较为简单，这里就直接实现了。没将索引文件持久化，直接就加载内存里了。除此之外，BM25为ES默认的相关性排序算法，也可以借助ES去实现。
+```
+retrieval
+├── bge
+│   ├── bge-large-zh-v1.5                 // bge模型文件
+│   ├── bge_download_model.py             // 下载bge模型文件的脚本    
+│   ├── bge_index.py                      // 构建bge索引
+│   ├── bge_retrieval.py                  // 使用索引进行bge检索
+│   └── index                             // bge索引文件
+├── bm25
+│   ├── bm25_index.py                     // 构建bm25索引
+│   ├── bm25_retrieval.py                 // 使用索引进行bm25检索
+│   ├── index                             // bm25索引文件
+│   └── stop_words.txt                    // 停用词
+├── code.py
+├── log.py
+├── response.py
+├── retrieval_index.py                    // 构建索引文件脚本
+├── retrieval_server.py                   // 部署检索服务
+└── test
+    └── retrieval_test.py                 // 测试检索服务
+```
 
-./rag-omni/retrieval/bm25_retrieval/bm25.py
+### 3.2 BM25检索算法
+
+BM25算法较为简单，这里就直接实现了。除此之外，BM25为ES默认的相关性排序算法，也可以借助ES去实现。
+
+#### 3.2.1 构建BM25索引
+
+支持增量构建BM25索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
+
+./rag-omni/retrieval/bm25/bm25_index.py
 
 ```python
 # -*- coding: utf-8 -*-
@@ -388,6 +417,7 @@ import os
 import jieba
 import logging
 import json
+import uuid
 
 jieba.setLogLevel(log_level=logging.INFO)
 
@@ -409,24 +439,55 @@ class BM25Param(object):
         return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
 
 
-class BM25Algorithm(object):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    _stop_words_path = os.path.join(current_dir, 'stop_words.txt')
-    _stop_words = []
-
-    def __init__(self, file_paths):
+class BM25Builder(object):
+    def __init__(self, file_paths, old_index_path=None):
         self.file_paths = file_paths
-        self.param: BM25Param = self._load_param()
+        self.old_index_path = old_index_path
+        self._stop_words = self._load_stop_words()
 
     def _load_stop_words(self):
-        if not os.path.exists(self._stop_words_path):
-            raise Exception(f"system stop words: {self._stop_words_path} not found")
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        stop_words_path = os.path.join(current_dir, 'stop_words.txt')
+        if not os.path.exists(stop_words_path):
+            raise Exception(f"system stop words: {stop_words_path} not found")
         stop_words = []
-        with open(self._stop_words_path, 'r', encoding='utf8') as reader:
+        with open(stop_words_path, 'r', encoding='utf8') as reader:
             for line in reader:
                 line = line.strip()
                 stop_words.append(line)
         return stop_words
+
+    def _load_old_index(self):
+        if not self.old_index_path or not os.path.exists(self.old_index_path):
+            return None
+        with open(self.old_index_path, 'r', encoding='utf8') as f:
+            old_index_data = json.load(f)
+        return BM25Param(**old_index_data)
+
+    def _merge_indexes(self, old_param, new_param):
+        if not old_param:
+            return new_param
+
+        new_param.length += old_param.length
+        new_param.avg_length = ((old_param.avg_length * old_param.length) + (new_param.avg_length * len(new_param.docs_list))) / new_param.length
+
+        for word, freq in new_param.df.items():
+            if word in old_param.df:
+                old_param.df[word] += freq
+            else:
+                old_param.df[word] = freq
+
+        for word, score in new_param.idf.items():
+            if word in old_param.idf:
+                old_param.idf[word] += score
+            else:
+                old_param.idf[word] = score
+
+        old_param.f.extend(new_param.f)
+        old_param.docs_list.extend(new_param.docs_list)
+        old_param.line_length_list.extend(new_param.line_length_list)
+
+        return old_param
 
     def _build_param(self):
         def _cal_param(docs_data):
@@ -466,12 +527,100 @@ class BM25Algorithm(object):
                     doc["file_path"] = file_path
                 docs_data.extend(docs)
 
-        param = _cal_param(docs_data)
-        return param
+        new_param = _cal_param(docs_data)
+        old_param = self._load_old_index()
+
+        return self._merge_indexes(old_param, new_param)
+
+    def build_index(self, output_path, index_name=None):
+        param = self._build_param()
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        if not index_name:
+            index_name = str(uuid.uuid4())
+        index_file = os.path.join(output_path, f'{index_name}.json')
+        with open(index_file, 'w', encoding='utf8') as f:
+            json.dump(param.__dict__, f, ensure_ascii=False, indent=4)
+        print(f"Index saved to {index_file}")
+
+
+if __name__ == '__main__':
+
+    index_name = "bm25_index"      # 定义索引名（如果不指定则自动使用uuid生成）
+    output_path = "./index"        # 定义索引的存储路径
+
+    # 用一个文件构建初始索引
+    file_paths = [
+        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
+    ]
+    builder = BM25Builder(file_paths)
+    builder.build_index(output_path, index_name=index_name)
+
+    # 用另一个文件和旧索引增量构建新索引
+    file_paths = [
+        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
+    ]
+    old_index_path = "{}/{}.json".format(output_path, index_name)
+    builder = BM25Builder(file_paths, old_index_path)
+    builder.build_index(output_path, index_name=index_name)
+```
+
+#### 3.2.2 实现BM25检索
+
+./rag-omni/retrieval/bm25/bm25_retrieval.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+import jieba
+import logging
+import json
+
+jieba.setLogLevel(log_level=logging.INFO)
+
+
+class BM25Param(object):
+    def __init__(self, f, df, idf, length, avg_length, docs_list, line_length_list, k1=1.5, k2=1.0, b=0.75):
+        self.f = f
+        self.df = df
+        self.k1 = k1
+        self.k2 = k2
+        self.b = b
+        self.idf = idf
+        self.length = length
+        self.avg_length = avg_length
+        self.docs_list = docs_list
+        self.line_length_list = line_length_list
+
+    def __str__(self):
+        return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
+
+
+class BM25Algorithm(object):
+    def __init__(self, index_path):
+        self.index_path = index_path
+        self.param: BM25Param = self._load_param()
+        self._stop_words = self._load_stop_words()
+
+    def _load_stop_words(self):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        stop_words_path = os.path.join(current_dir, 'stop_words.txt')
+        if not os.path.exists(stop_words_path):
+            raise Exception(f"system stop words: {stop_words_path} not found")
+        stop_words = []
+        with open(stop_words_path, 'r', encoding='utf8') as reader:
+            for line in reader:
+                line = line.strip()
+                stop_words.append(line)
+        return stop_words
 
     def _load_param(self):
-        self._stop_words = self._load_stop_words()
-        param = self._build_param()
+        if not os.path.exists(self.index_path):
+            raise Exception(f"Index file {self.index_path} not found")
+        with open(self.index_path, 'r', encoding='utf8') as f:
+            data = json.load(f)
+            param = BM25Param(**data)
         return param
 
     def _cal_similarity(self, words, index):
@@ -513,11 +662,8 @@ class BM25Algorithm(object):
 
 
 if __name__ == '__main__':
-    file_paths = [
-        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json",
-        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
-    ]
-    bm25 = BM25Algorithm(file_paths)
+    index_path = "./index/bm25_index.json"
+    bm25 = BM25Algorithm(index_path)
     query_content = "国务院对于地方政府性债务管理的意见"
     top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
     result = bm25.search(query_content, top_k)
@@ -526,100 +672,11 @@ if __name__ == '__main__':
 
 注：代码中会用到 stop_words.txt 文件，已经放到项目里了，这里就不展示了。
 
-#### 3.1.2 BGE检索算法
+### 3.3 BGE检索算法
 
-BGE向量检索需要下载 BAAI/bge-large-zh-v1.5 模型文件，项目里提供了模型下载脚本。没将索引文件持久化，直接就加载内存里了。
+BGE向量检索需要下载 BAAI/bge-large-zh-v1.5 模型文件，项目里提供了模型下载脚本。
 
-./rag-omni/retrieval/bge_retrieval/bge.py
-
-```python
-# -*- coding: utf-8 -*-
-
-import os
-import faiss
-import json
-import numpy as np
-from tqdm import trange
-from transformers import AutoTokenizer, AutoModel
-import torch
-
-
-class BGEAlgorithm:
-    def __init__(self, file_paths):
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.model_path = os.path.join(current_dir, 'bge-large-zh-v1.5')
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self.model = AutoModel.from_pretrained(self.model_path)
-        self.data_list = self.load_data(file_paths)
-        self.embeddings_list = self.generate_embeddings()
-        self.faiss_index = self.build_faiss_index()
-
-    def load_data(self, file_paths):
-        """读取数据文件并生成嵌入"""
-        data_list = []
-        for file_path in file_paths:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for item in data:
-                item['file_name'] = os.path.splitext(os.path.basename(file_path))[0] + '.docx'
-                data_list.append(item)
-        return data_list
-
-    def generate_embeddings(self):
-        """生成嵌入"""
-        embeddings_list = []
-        batch_size = 32
-        for i in trange(0, len(self.data_list), batch_size):
-            batch_texts = [item['part_content'] for item in self.data_list[i:i + batch_size]]
-            inputs = self.tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
-            embeddings_list.extend(embeddings)
-        return embeddings_list
-
-    def build_faiss_index(self):
-        """构建Faiss索引"""
-        doc_embeddings = np.array(self.embeddings_list)
-        faiss_index = faiss.IndexFlatIP(doc_embeddings.shape[1])
-        faiss_index.add(doc_embeddings)
-        return faiss_index
-
-    def search(self, query, top_k=-1):
-        """检索函数"""
-        inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-        query_emb = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
-        if top_k == -1:
-            top_k = len(self.data_list)
-        score, rank = self.faiss_index.search(query_emb, top_k)
-        rank = rank[0]
-        score = score[0]
-        results = [
-            {
-                "file_name": self.data_list[rank[i]]["file_name"],
-                "part_content": self.data_list[rank[i]]["part_content"],
-                "score": float(score[i])
-            }
-            for i in range(top_k)
-        ]
-        return results
-
-
-if __name__ == '__main__':
-    file_paths = [
-        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json",
-        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
-    ]
-    query_text = "国务院对于地方政府性债务管理的意见"
-    top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
-    bge = BGEAlgorithm(file_paths)
-    results = bge.search(query_text, top_k)
-    print(json.dumps(results, ensure_ascii=False, indent=4))
-```
-
-注：代码中会用到 bge-large-zh-v1.5 模型文件，这个没放到项目里，可以使用 ./rag-omni/retrieval/bge_retrieval/download_bge_model.py 脚本进行下载
+ ./rag-omni/retrieval/bge/download_bge_model.py
 
 ```python
 # -*- coding: utf-8 -*-
@@ -652,9 +709,248 @@ if __name__ == '__main__':
     download_and_save_model(model_name, save_directory)
 ```
 
-### 3.2 部署检索服务
+#### 3.3.1 构建BGE索引
 
-#### 3.2.1 封装检索服务
+支持增量构建BGE索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
+
+./rag-omni/retrieval/bge/bge_index.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+import json
+import numpy as np
+from tqdm import trange
+from transformers import AutoTokenizer, AutoModel
+import torch
+import uuid
+
+
+class BGEIndexer:
+    def __init__(self, file_paths, old_index_path=None):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.model_path = os.path.join(current_dir, 'bge-large-zh-v1.5')
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        self.model = AutoModel.from_pretrained(self.model_path)
+        self.old_index_path = old_index_path
+        self.data_list = self.load_data(file_paths)
+        self.embeddings_list = self.generate_embeddings()
+
+    def load_data(self, file_paths):
+        """读取数据文件"""
+        data_list = []
+        for file_path in file_paths:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for item in data:
+                item['file_name'] = os.path.basename(file_path)
+                data_list.append(item)
+        return data_list
+
+    def generate_embeddings(self):
+        """生成嵌入"""
+        embeddings_list = []
+        batch_size = 32
+        for i in trange(0, len(self.data_list), batch_size):
+            batch_texts = [item['part_content'] for item in self.data_list[i:i + batch_size]]
+            inputs = self.tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+            embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+            embeddings_list.extend(embeddings)
+        return np.array(embeddings_list)
+
+    def _load_old_index(self):
+        if not self.old_index_path or not os.path.exists(self.old_index_path):
+            return None, None
+        data = np.load(self.old_index_path, allow_pickle=True)
+        old_embeddings_list = data['embeddings_list']
+        old_data_list_json = data['data_list'].item()
+        old_data_list = json.loads(old_data_list_json)
+        return old_data_list, old_embeddings_list
+
+    def _merge_indexes(self, old_data_list, old_embeddings_list):
+        if old_data_list is None or old_embeddings_list is None:
+            return self.data_list, self.embeddings_list
+        new_data_list = old_data_list + self.data_list
+        new_embeddings_list = np.vstack((old_embeddings_list, self.embeddings_list))
+        return new_data_list, new_embeddings_list
+
+    def save_index(self, output_path, index_name=None):
+        """保存索引到文件"""
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        if not index_name:
+            index_name = str(uuid.uuid4())
+        index_file = os.path.join(output_path, f'{index_name}.npz')
+
+        old_data_list, old_embeddings_list = self._load_old_index()
+        merged_data_list, merged_embeddings_list = self._merge_indexes(old_data_list, old_embeddings_list)
+
+        data_list_json = json.dumps(merged_data_list, ensure_ascii=False, indent=4)
+        np.savez(index_file, embeddings_list=merged_embeddings_list, data_list=data_list_json)
+        print(f"Index saved to {index_file}")
+
+
+if __name__ == '__main__':
+    index_name = "bge_index"  # 定义索引名（如果不指定则自动使用uuid生成）
+    output_path = "./index"   # 定义索引的存储路径
+
+    # 用一个文件构建初始索引
+    file_paths = [
+        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
+    ]
+    indexer = BGEIndexer(file_paths)
+    indexer.save_index(output_path, index_name=index_name)
+
+    # 用另一个文件和旧索引增量构建新索引
+    file_paths = [
+        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
+    ]
+    old_index_path = os.path.join(output_path, f'{index_name}.npz')
+    indexer = BGEIndexer(file_paths, old_index_path)
+    indexer.save_index(output_path, index_name=index_name)
+```
+
+#### 3.3.2 实现BGE检索
+
+./rag-omni/retrieval/bge/bge_retrieval.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+import json
+import numpy as np
+from transformers import AutoTokenizer, AutoModel
+import torch
+import faiss
+
+
+class BGEAlgorithm:
+    def __init__(self, index_file):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        self.model_path = os.path.join(current_dir, 'bge-large-zh-v1.5')
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+        self.model = AutoModel.from_pretrained(self.model_path)
+        self.data_list, self.embeddings_list = self.load_index(index_file)
+        self.faiss_index = self.build_faiss_index()
+
+    def load_index(self, index_file):
+        """加载索引文件"""
+        data = np.load(index_file, allow_pickle=True)
+        embeddings_list = data['embeddings_list']
+        data_list_json = data['data_list'].item()
+        data_list = json.loads(data_list_json)
+        return data_list, embeddings_list
+
+    def build_faiss_index(self):
+        """构建Faiss索引"""
+        faiss_index = faiss.IndexFlatIP(self.embeddings_list.shape[1])
+        faiss_index.add(self.embeddings_list)
+        return faiss_index
+
+    def search(self, query, top_k=-1):
+        """检索函数"""
+        inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        query_emb = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+        if top_k == -1:
+            top_k = len(self.data_list)
+        score, rank = self.faiss_index.search(query_emb, top_k)
+        rank = rank[0]
+        score = score[0]
+        results = [
+            {
+                "file_name": self.data_list[rank[i]]["file_name"],
+                "part_content": self.data_list[rank[i]]["part_content"],
+                "score": float(score[i])
+            }
+            for i in range(top_k)
+        ]
+        return results
+
+
+if __name__ == '__main__':
+    index_file = "./index/bge_index.npz"
+    query_text = "国务院对于地方政府性债务管理的意见"
+    top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
+    retriever = BGEAlgorithm(index_file)
+    results = retriever.search(query_text, top_k)
+    print(json.dumps(results, ensure_ascii=False, indent=4))
+```
+
+### 3.4 构建索引文件
+
+#### 3.4.1 封装索引构建
+
+./rag-omni/retrieval/retrieval_index.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import argparse
+import logging
+from bge.bge_index import BGEIndexer
+from bm25.bm25_index import BM25Builder
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="构建索引的参数")
+    parser.add_argument('--file_paths', type=str, required=True, help="JSON知识文件路径（多个用逗号分隔）")
+    parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE'], required=True, help="索引算法：目前仅支持BM25或BGE")
+    parser.add_argument('--output_path', type=str, required=True, help="索引存储路径")
+    parser.add_argument('--index_name', type=str, required=False, help="索引名（可选，如果不指定则自动使用UUID生成）")
+    parser.add_argument('--old_index_path', type=str, required=False, help="旧索引路径（可选，传递旧索引则增量构建）")
+    args = parser.parse_args()
+
+    file_paths = args.file_paths.split(',')
+    algorithm = args.algorithm
+    output_path = args.output_path
+    index_name = args.index_name
+    old_index_path = args.old_index_path
+
+    try:
+        if algorithm == 'BGE':
+            logging.info("开始构建BGE索引...")
+            indexer = BGEIndexer(file_paths, old_index_path)
+            indexer.save_index(output_path, index_name)
+            logging.info("BGE索引构建成功")
+        elif algorithm == 'BM25':
+            logging.info("开始构建BM25索引...")
+            builder = BM25Builder(file_paths, old_index_path)
+            builder.build_index(output_path, index_name)
+            logging.info("BM25索引构建成功")
+        else:
+            raise ValueError("Unsupported algorithm. Please choose either 'BM25' or 'BGE'.")
+    except Exception as e:
+        logging.error(f"索引构建失败: {e}")
+        raise
+```
+
+#### 3.4.2 生成索引文件并测试
+
+以下示例命令里为了演示增量构建索引的流程，将构建索引文件分成两步了，实际使用时可以一步进行构建。file_paths 参数传递知识文件，多个使用逗号进行分隔，旧索引路径是可选项，如果传递进去则会增量构建，不传递则使用知识文件从零构建。
+
+```shell
+// 构建BM25索引
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json" --algorithm BM25 --output_path "./retrieval/bm25/index" --index_name "bm25_index"
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json" --algorithm BM25 --output_path "./retrieval/bm25/index" --index_name "bm25_index" --old_index_path "./retrieval/bm25/index/bm25_index.json"
+
+// 构建BGE索引
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json" --algorithm BGE --output_path "./retrieval/bge/index" --index_name "bge_index"
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json" --algorithm BGE --output_path "./retrieval/bge/index" --index_name "bge_index" --old_index_path "./retrieval/bge/index/bge_index.npz"
+```
+
+注：构建完之后，拿 ./rag-omni/retrieval/bm25/bm25_retrieval.py 和 ./rag-omni/retrieval/bge/bge_retrieval.py 程序里的 main 测试是否能够检索即可。
+
+### 3.5 部署检索服务
+
+#### 3.5.1 封装检索服务
 
 这里使用 Flask 框架将 BM25、BGE检索算法封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入知识库文件路径（json_files）、检索算法（algorithm）、服务端口号（port），/api/rag/retrieval 接口入参接受输入问题（question）和检索条数（top_k）。
 
@@ -671,17 +967,17 @@ from pre_request import pre, Rule
 
 from log import logger
 from response import ResponseCode, ResponseMessage
-from bm25_retrieval.bm25 import BM25Algorithm
-from bge_retrieval.bge import BGEAlgorithm
+from bm25.bm25_retrieval import BM25Algorithm
+from bge.bge_retrieval import BGEAlgorithm
 
 # 解析启动参数
 parser = argparse.ArgumentParser(description="启动参数")
-parser.add_argument('--json_files', type=str, required=True, help="JSON文件路径，多个用逗号分隔")
+parser.add_argument('--index_file', type=str, required=True, help="索引文件路径")
 parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE'], required=True, help="检索算法：目前仅支持BM25或BGE")
 parser.add_argument('--port', type=int, default=5001, help="启动的端口号，默认5001")
 args = parser.parse_args()
 
-json_file_paths = args.json_files.split(',')
+index_file = args.index_file
 retrieval_algorithm = args.algorithm
 port = args.port
 
@@ -689,17 +985,11 @@ port = args.port
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
-# 加载JSON文件内容到内存中
-documents = []
-for path in json_file_paths:
-    with open(path, 'r', encoding='utf-8') as file:
-        documents.extend(json.load(file))
-
 # 初始化检索算法
 if retrieval_algorithm == 'BM25':
-    search_engine = BM25Algorithm(json_file_paths)
+    search_engine = BM25Algorithm(index_file)
 elif retrieval_algorithm == 'BGE':
-    search_engine = BGEAlgorithm(json_file_paths)
+    search_engine = BGEAlgorithm(index_file)
 else:
     raise ValueError("Unsupported retrieval algorithm")
 
@@ -746,13 +1036,14 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 ```
 
-#### 3.2.2 启动检索服务并测试
+#### 3.5.2 启动检索服务并测试
 
-启动检索服务，这里以BM25算法为例，如果要使用 BGE 算法，则修改 --algorithm 传参为 BGE 即可。
+选择索引文件启动检索服务，以下两种检索服务选择一个进行启动即可。
 
 ```shell
 $ cd ./retrieval
-$ python3 retrieval_server.py --json_files "../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json,../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json" --algorithm BM25 --port 5001
+$ python3 retrieval_server.py --index_file "./bm25/index/bm25_index.json" --algorithm BM25 --port 5001  // 启动BM25检索服务
+$ python3 retrieval_server.py --index_file "./bge/index/bge_index.npz" --algorithm BGE --port 5001      // 启动BGE检索服务
 ```
 
 ./rag-omni/retrieval/test/retrieval_test.py 可用来测试检索服务
