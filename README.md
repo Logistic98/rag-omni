@@ -10,7 +10,7 @@
 
 ### 1.2 实例场景及源码
 
-实例场景概述：有一批内部的政府政策文档，数据不可外传，使用自部署的大模型来实现，需要基于这些文档进行垂直领域的问答。
+实例场景概述：有一批内部的政府政策文档，需要基于这些文档进行垂直领域的RAG问答。
 
 本项目我已经在Github上进行了开源，项目地址为：[https://github.com/Logistic98/rag-omni](https://github.com/Logistic98/rag-omni)
 
@@ -18,16 +18,13 @@
 .
 ├── README.md
 ├── data                  // 示例数据
-│   ├── convert_data           // 转换处理数据的脚本
 │   ├── original_data          // 原始文档数据
 │   └── preprocess_data        // 处理后的结构化数据
-├── balance               // 负载均衡
-│   ├── Dockerfile
-│   ├── build.sh               // 负载均衡的一键脚本
-│   ├── nginx.conf
-│   ├── nginx_balance.conf     // 负载均衡的核心脚本
-│   └── proxy.conf
+├── convert               // 转换数据
+│   ├── data_convert_json      // 数据结构化转换脚本
+│   └── marker_parse_pdf       // Marker解析PDF工具
 ├── llm                   // 大模型服务
+│   ├── nginx_balance          // Nginx负载均衡
 │   ├── llm_server.py          // 部署本地大模型服务
 │   ├── llmtuner               // 部署本地大模型服务的核心代码
 │   ├── models                 // 存放本地大模型的模型文件
@@ -70,9 +67,9 @@
 
 #### 1.3.2 数据预处理脚本
 
-PDF格式是非常难处理的，如果是文本类型的可以使用以下脚本来初步处理，如果本身就是图片类型的，那该脚本解析不了，就需要OCR技术来辅助了。关于复杂PDF文件的解析可以使用 Marker 库，详见我的另一篇博客：[PDF解析与基于LLM的本地知识库问答](https://www.eula.club/blogs/PDF解析与基于LLM的本地知识库问答.html)
+PDF格式是非常难处理的，如果是文本类型的可以使用以下脚本来初步处理，如果本身就是图片类型的，那该脚本解析不了，就需要OCR技术来辅助了。关于复杂PDF文件的解析可以使用 Marker 工具。
 
-./rag-omni/data/convert_data/pdf_to_docx.py
+./rag-omni/convert/data_convert_json/pdf_to_docx.py
 
 ```python
 # -*- coding: utf-8 -*-
@@ -100,7 +97,7 @@ except Exception as e:
     print(f"转换过程中发生错误：{str(e)}")
 ```
 
-./rag-omni/data/convert_data/docx_to_json.py
+./rag-omni/convert/data_convert_json/docx_to_json.py
 
 ```python
 # -*- coding: utf-8 -*-
@@ -329,11 +326,11 @@ if __name__ == '__main__':
 
 需求情景：一台服务器上有多张显卡，用不同的显卡部署了多个大模型服务，现在想要进一步提高大模型服务的并发量，可以使用Nginx负载均衡来实现。
 
-- 有关Nginx负载均衡的内容这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
+- 有关Nginx负载均衡的具体配置策略这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
 
 这里假设启动了3个大模型服务，端口号分别是4997、4998、4999，现在想要将其都配置到5000端口上。修改以下配置文件，换成实际的服务地址，weight=1是权重，这里默认各服务为相同权重。
 
-./rag-omni/balance/nginx_balance.conf
+./rag-omni/llm/nginx_balance/nginx_balance.conf
 
 ```ini
 upstream nginx_balance {
@@ -359,7 +356,7 @@ server {
 }
 ```
 
-./rag-omni/balance/build.sh
+./rag-omni/llm/nginx_balance/build.sh
 
 ```shell
 #!/bin/bash
