@@ -5,8 +5,8 @@ import subprocess
 
 if __name__ == '__main__':
 
-    input_dir = "../original_data"  # docx 文件目录
-    output_dir = "../preprocess_data_temp"  # json 结果输出目录
+    input_dir = "../../data/original_data"  # docx 文件目录
+    output_dir = "../../data/preprocess_data_temp"  # json 结果输出目录
     max_length = 500  # 切片大小
 
     os.makedirs(output_dir, exist_ok=True)
