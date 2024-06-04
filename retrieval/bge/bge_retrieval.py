@@ -10,6 +10,7 @@ import faiss
 
 class BGEAlgorithm:
     def __init__(self, index_file):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_path = os.path.join(current_dir, 'bge-large-zh-v1.5')
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
@@ -33,10 +34,10 @@ class BGEAlgorithm:
 
     def search(self, query, top_k=-1):
         """检索函数"""
-        inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512)
+        inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512).to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
-        query_emb = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+        query_emb = outputs.last_hidden_state.mean(dim=1).to('cpu').numpy()
         if top_k == -1:
             top_k = len(self.data_list)
         score, rank = self.faiss_index.search(query_emb, top_k)
