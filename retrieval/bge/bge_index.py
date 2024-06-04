@@ -11,13 +11,15 @@ import uuid
 
 class BGEIndexer:
     def __init__(self, file_paths, old_index_path=None):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_path = os.path.join(current_dir, 'bge-large-zh-v1.5')
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        self.model = AutoModel.from_pretrained(self.model_path)
+        self.model = AutoModel.from_pretrained(self.model_path).to(self.device)
         self.old_index_path = old_index_path
         self.data_list = self.load_data(file_paths)
         self.embeddings_list = self.generate_embeddings()
+        self.cuda_oom_flag = False
 
     def load_data(self, file_paths):
         """读取数据文件"""
@@ -33,14 +35,32 @@ class BGEIndexer:
     def generate_embeddings(self):
         """生成嵌入"""
         embeddings_list = []
-        batch_size = 32
+        batch_size = 4
+        has_switched_to_cpu = False
         for i in trange(0, len(self.data_list), batch_size):
             batch_texts = [item['part_content'] for item in self.data_list[i:i + batch_size]]
-            inputs = self.tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=512)
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+            inputs = self.tokenizer(batch_texts, return_tensors='pt', padding=True, truncation=True, max_length=512).to(
+                self.device)
+            try:
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                embeddings = outputs.last_hidden_state.mean(dim=1).to('cpu').numpy()
+            except RuntimeError as e:
+                if 'CUDA out of memory' in str(e):
+                    if not has_switched_to_cpu:
+                        print("CUDA out of memory. Switching to CPU for this batch.")
+                        has_switched_to_cpu = True
+                    torch.cuda.empty_cache()
+                    inputs = inputs.to('cpu')
+                    self.model.to('cpu')
+                    with torch.no_grad():
+                        outputs = self.model(**inputs)
+                    embeddings = outputs.last_hidden_state.mean(dim=1).numpy()
+                    self.model.to(self.device)
+                else:
+                    raise e
             embeddings_list.extend(embeddings)
+            torch.cuda.empty_cache()
         return np.array(embeddings_list)
 
     def _load_old_index(self):
