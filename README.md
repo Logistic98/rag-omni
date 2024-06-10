@@ -1233,7 +1233,7 @@ $ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/�
 
 #### 3.6.1 封装检索服务
 
-这里使用 Flask 框架将 BM25、BGE检索算法封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入知识库文件路径（json_files）、检索算法（algorithm）、服务端口号（port），/api/rag/retrieval 接口入参接受输入问题（question）和检索条数（top_k）。
+这里使用 Flask 框架将检索算法封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入知识库文件路径（json_files）、检索算法（algorithm）、服务端口号（port），/api/rag/retrieval 接口入参接受输入问题（question）和检索条数（top_k）。
 
 ./rag-omni/retrieval/retrieval_server.py
 
@@ -1303,7 +1303,15 @@ def retrieval():
     top_k = params.get("top_k")
 
     # 业务处理模块
-    results = search_engine.search(question, top_k)
+    try:
+        results = search_engine.search(question, top_k)
+    except Exception as e:
+        logger.error(e)
+        fail_response = dict(code=ResponseCode.BUSINESS_FAIL, msg=ResponseMessage.BUSINESS_FAIL, data=None)
+        logger.error(fail_response)
+        response = jsonify(fail_response)
+        response.data = json.dumps(fail_response, ensure_ascii=False, indent=4)
+        return response
 
     # 成功的结果返回，格式化JSON
     success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data=results)

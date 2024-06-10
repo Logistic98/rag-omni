@@ -63,7 +63,15 @@ def retrieval():
     top_k = params.get("top_k")
 
     # 业务处理模块
-    results = search_engine.search(question, top_k)
+    try:
+        results = search_engine.search(question, top_k)
+    except Exception as e:
+        logger.error(e)
+        fail_response = dict(code=ResponseCode.BUSINESS_FAIL, msg=ResponseMessage.BUSINESS_FAIL, data=None)
+        logger.error(fail_response)
+        response = jsonify(fail_response)
+        response.data = json.dumps(fail_response, ensure_ascii=False, indent=4)
+        return response
 
     # 成功的结果返回，格式化JSON
     success_response = dict(code=ResponseCode.SUCCESS, msg=ResponseMessage.SUCCESS, data=results)
