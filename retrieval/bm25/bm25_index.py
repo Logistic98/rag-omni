@@ -27,7 +27,7 @@ class BM25Param(object):
         return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
 
 
-class BM25Builder(object):
+class BM25Indexer(object):
     def __init__(self, file_paths, old_index_path=None):
         self.file_paths = file_paths
         self.old_index_path = old_index_path
@@ -56,8 +56,10 @@ class BM25Builder(object):
         if not old_param:
             return new_param
 
-        new_param.length += old_param.length
-        new_param.avg_length = ((old_param.avg_length * old_param.length) + (new_param.avg_length * len(new_param.docs_list))) / new_param.length
+        combined_length = old_param.length + new_param.length
+        combined_avg_length = (
+            (old_param.avg_length * old_param.length) + (new_param.avg_length * new_param.length)
+        ) / combined_length
 
         for word, freq in new_param.df.items():
             if word in old_param.df:
@@ -67,13 +69,16 @@ class BM25Builder(object):
 
         for word, score in new_param.idf.items():
             if word in old_param.idf:
-                old_param.idf[word] += score
+                old_param.idf[word] = (old_param.idf[word] * old_param.length + score * new_param.length) / combined_length
             else:
                 old_param.idf[word] = score
 
         old_param.f.extend(new_param.f)
         old_param.docs_list.extend(new_param.docs_list)
         old_param.line_length_list.extend(new_param.line_length_list)
+
+        old_param.length = combined_length
+        old_param.avg_length = combined_avg_length
 
         return old_param
 
@@ -141,13 +146,13 @@ if __name__ == '__main__':
     file_paths = [
         "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
     ]
-    builder = BM25Builder(file_paths)
-    builder.build_index(output_path, index_name=index_name)
+    indexer = BM25Indexer(file_paths)
+    indexer.build_index(output_path, index_name=index_name)
 
     # 用另一个文件和旧索引增量构建新索引
     file_paths = [
         "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
     ]
     old_index_path = "{}/{}.json".format(output_path, index_name)
-    builder = BM25Builder(file_paths, old_index_path)
-    builder.build_index(output_path, index_name=index_name)
+    indexer = BM25Indexer(file_paths, old_index_path)
+    indexer.build_index(output_path, index_name=index_name)

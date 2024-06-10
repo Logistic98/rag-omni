@@ -25,7 +25,7 @@ class BM25Param(object):
         return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
 
 
-class BM25Algorithm(object):
+class BM25Retrieval(object):
     def __init__(self, index_path):
         self.index_path = index_path
         self.param: BM25Param = self._load_param()
@@ -91,7 +91,7 @@ class BM25Algorithm(object):
 
 if __name__ == '__main__':
     index_path = "./index/bm25_index.json"
-    bm25 = BM25Algorithm(index_path)
+    bm25 = BM25Retrieval(index_path)
     query_content = "国务院对于地方政府性债务管理的意见"
     top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
     result = bm25.search(query_content, top_k)

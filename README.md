@@ -14,6 +14,8 @@
 
 本项目我已经在Github上进行了开源，项目地址为：[https://github.com/Logistic98/rag-omni](https://github.com/Logistic98/rag-omni)
 
+- 注：仅作为示例演示整个RAG的过程，实际应用追求效果的话，这些是远远不够的，开源模型和检索算法的性能不够好，也有很多特殊情况需要处理。
+
 ```
 .
 ├── README.md
@@ -32,6 +34,7 @@
 ├── retrieval            // 检索服务
 │   ├── bge                    // BGE检索算法的核心代码
 │   ├── bm25                   // BM25检索算法的核心代码
+│   ├── openai_embedding       // OpenAI Embedding检索算法的核心代码
 │   ├── code.py
 │   ├── log.py
 │   ├── response.py
@@ -380,13 +383,17 @@ retrieval
 │   ├── bge-large-zh-v1.5                 // bge模型文件
 │   ├── bge_download_model.py             // 下载bge模型文件的脚本    
 │   ├── bge_index.py                      // 构建bge索引
-│   ├── bge_retrieval.py                  // 使用索引进行bge检索
+│   ├── bge_retrieval.py                  // 使用bge索引进行检索
 │   └── index                             // bge索引文件
 ├── bm25
 │   ├── bm25_index.py                     // 构建bm25索引
-│   ├── bm25_retrieval.py                 // 使用索引进行bm25检索
+│   ├── bm25_retrieval.py                 // 使用bm25索引进行检索
 │   ├── index                             // bm25索引文件
 │   └── stop_words.txt                    // 停用词
+├── openai_embedding
+│   ├── openai_index.py                   // 构建openai_embedding索引
+│   ├── openai_retrieval.py               // 使用openai_embedding索引进行检索
+│   └── index                             // openai_embedding索引文件
 ├── code.py
 ├── log.py
 ├── response.py
@@ -436,7 +443,7 @@ class BM25Param(object):
         return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
 
 
-class BM25Builder(object):
+class BM25Indexer(object):
     def __init__(self, file_paths, old_index_path=None):
         self.file_paths = file_paths
         self.old_index_path = old_index_path
@@ -465,8 +472,10 @@ class BM25Builder(object):
         if not old_param:
             return new_param
 
-        new_param.length += old_param.length
-        new_param.avg_length = ((old_param.avg_length * old_param.length) + (new_param.avg_length * len(new_param.docs_list))) / new_param.length
+        combined_length = old_param.length + new_param.length
+        combined_avg_length = (
+            (old_param.avg_length * old_param.length) + (new_param.avg_length * new_param.length)
+        ) / combined_length
 
         for word, freq in new_param.df.items():
             if word in old_param.df:
@@ -476,13 +485,16 @@ class BM25Builder(object):
 
         for word, score in new_param.idf.items():
             if word in old_param.idf:
-                old_param.idf[word] += score
+                old_param.idf[word] = (old_param.idf[word] * old_param.length + score * new_param.length) / combined_length
             else:
                 old_param.idf[word] = score
 
         old_param.f.extend(new_param.f)
         old_param.docs_list.extend(new_param.docs_list)
         old_param.line_length_list.extend(new_param.line_length_list)
+
+        old_param.length = combined_length
+        old_param.avg_length = combined_avg_length
 
         return old_param
 
@@ -550,16 +562,16 @@ if __name__ == '__main__':
     file_paths = [
         "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
     ]
-    builder = BM25Builder(file_paths)
-    builder.build_index(output_path, index_name=index_name)
+    indexer = BM25Indexer(file_paths)
+    indexer.build_index(output_path, index_name=index_name)
 
     # 用另一个文件和旧索引增量构建新索引
     file_paths = [
         "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
     ]
     old_index_path = "{}/{}.json".format(output_path, index_name)
-    builder = BM25Builder(file_paths, old_index_path)
-    builder.build_index(output_path, index_name=index_name)
+    indexer = BM25Indexer(file_paths, old_index_path)
+    indexer.build_index(output_path, index_name=index_name)
 ```
 
 #### 3.2.2 实现BM25检索
@@ -594,7 +606,7 @@ class BM25Param(object):
         return f"k1:{self.k1}, k2:{self.k2}, b:{self.b}"
 
 
-class BM25Algorithm(object):
+class BM25Retrieval(object):
     def __init__(self, index_path):
         self.index_path = index_path
         self.param: BM25Param = self._load_param()
@@ -660,7 +672,7 @@ class BM25Algorithm(object):
 
 if __name__ == '__main__':
     index_path = "./index/bm25_index.json"
-    bm25 = BM25Algorithm(index_path)
+    bm25 = BM25Retrieval(index_path)
     query_content = "国务院对于地方政府性债务管理的意见"
     top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
     result = bm25.search(query_content, top_k)
@@ -737,18 +749,14 @@ class BGEIndexer:
         self.cuda_oom_flag = False
 
     def load_data(self, file_paths):
-        """读取数据文件"""
         data_list = []
         for file_path in file_paths:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for item in data:
-                item['file_name'] = os.path.basename(file_path)
-                data_list.append(item)
+            data_list.extend(data)
         return data_list
 
     def generate_embeddings(self):
-        """生成嵌入"""
         embeddings_list = []
         batch_size = 4
         has_switched_to_cpu = False
@@ -794,8 +802,7 @@ class BGEIndexer:
         new_embeddings_list = np.vstack((old_embeddings_list, self.embeddings_list))
         return new_data_list, new_embeddings_list
 
-    def save_index(self, output_path, index_name=None):
-        """保存索引到文件"""
+    def build_index(self, output_path, index_name=None):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
         if not index_name:
@@ -819,7 +826,7 @@ if __name__ == '__main__':
         "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
     ]
     indexer = BGEIndexer(file_paths)
-    indexer.save_index(output_path, index_name=index_name)
+    indexer.build_index(output_path, index_name=index_name)
 
     # 用另一个文件和旧索引增量构建新索引
     file_paths = [
@@ -827,7 +834,7 @@ if __name__ == '__main__':
     ]
     old_index_path = os.path.join(output_path, f'{index_name}.npz')
     indexer = BGEIndexer(file_paths, old_index_path)
-    indexer.save_index(output_path, index_name=index_name)
+    indexer.build_index(output_path, index_name=index_name)
 ```
 
 #### 3.3.2 实现BGE检索
@@ -845,7 +852,7 @@ import torch
 import faiss
 
 
-class BGEAlgorithm:
+class BGERetrieval:
     def __init__(self, index_file):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -856,7 +863,6 @@ class BGEAlgorithm:
         self.faiss_index = self.build_faiss_index()
 
     def load_index(self, index_file):
-        """加载索引文件"""
         data = np.load(index_file, allow_pickle=True)
         embeddings_list = data['embeddings_list']
         data_list_json = data['data_list'].item()
@@ -864,13 +870,11 @@ class BGEAlgorithm:
         return data_list, embeddings_list
 
     def build_faiss_index(self):
-        """构建Faiss索引"""
         faiss_index = faiss.IndexFlatIP(self.embeddings_list.shape[1])
         faiss_index.add(self.embeddings_list)
         return faiss_index
 
     def search(self, query, top_k=-1):
-        """检索函数"""
         inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512).to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -894,15 +898,255 @@ class BGEAlgorithm:
 if __name__ == '__main__':
     index_file = "./index/bge_index.npz"
     query_text = "国务院对于地方政府性债务管理的意见"
-    top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
-    retriever = BGEAlgorithm(index_file)
+    top_k = -1  # 可以设置为任意正整数，或者-1表示不限制
+    retriever = BGERetrieval(index_file)
     results = retriever.search(query_text, top_k)
     print(json.dumps(results, ensure_ascii=False, indent=4))
 ```
 
-### 3.4 构建索引文件
+### 3.4 OpenAI Embedding检索算法
 
-#### 3.4.1 封装索引构建
+#### 3.4.1 构建OpenAI Embedding索引
+
+./rag-omni/retrieval/openai_embedding/openai_index.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+import json
+import pickle
+import uuid
+
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+
+
+class OpenAIIndexer:
+    def __init__(self, file_paths, openai_api_base, openai_api_key, embedding_model="text-embedding-3-large", old_index_path=None):
+        self.embedding_model = self.create_embedding_model(openai_api_base, openai_api_key, embedding_model)
+        self.old_index_path = old_index_path
+        self.new_data_list, self.new_content, self.new_metadata = self.load_data(file_paths)
+
+        if self.old_index_path and os.path.exists(self.old_index_path):
+            self.old_data_list, self.old_content, self.old_metadata = self.load_existing_data()
+            self.data_list = self.old_data_list + self.new_data_list
+            self.content = self.old_content + self.new_content
+            self.metadata = self.old_metadata + self.new_metadata
+        else:
+            self.data_list, self.content, self.metadata = self.new_data_list, self.new_content, self.new_metadata
+
+        self.faiss_vectorstore = self.generate_embedding()
+
+    def create_embedding_model(self, openai_api_base, openai_api_key, embedding_model):
+        return {
+            "openai_api_key": openai_api_key,
+            "openai_api_base": openai_api_base,
+            "model": embedding_model
+        }
+
+    def load_data(self, file_paths):
+        """读取数据文件"""
+        data_list = []
+        content_list = []
+        metadata_list = []
+        for file_path in file_paths:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for item in data:
+                item['file_name'] = os.path.basename(file_path)
+                data_list.append(item)
+                content_list.append(item['part_content'])
+                metadata_list.append({'file_name': os.path.basename(file_path)})
+        return data_list, content_list, metadata_list
+
+    def generate_embedding(self):
+        embedding_model_instance = OpenAIEmbeddings(**self.embedding_model)
+        return FAISS.from_texts(self.content, embedding_model_instance, metadatas=self.metadata)
+
+    def get_index_folder(self, output_path, index_name):
+        return os.path.join(output_path, index_name)
+
+    def load_existing_data(self):
+        index_folder = self.old_index_path
+        embedding_path = os.path.join(index_folder, 'embeddings')
+
+        with open(os.path.join(embedding_path, 'index.faiss'), 'rb') as f:
+            index = pickle.load(f)
+
+        with open(os.path.join(embedding_path, 'docstore.pkl'), 'rb') as f:
+            docstore = pickle.load(f)
+
+        with open(os.path.join(embedding_path, 'index_to_docstore_id.pkl'), 'rb') as f:
+            index_to_docstore_id = pickle.load(f)
+
+        embedding_model_instance = OpenAIEmbeddings(**self.embedding_model)
+        faiss_vectorstore = FAISS(
+            index=index,
+            embedding_function=embedding_model_instance,
+            docstore=docstore,
+            index_to_docstore_id=index_to_docstore_id
+        )
+
+        with open(os.path.join(index_folder, 'content.pkl'), 'rb') as file:
+            content = pickle.load(file)
+
+        with open(os.path.join(index_folder, 'metadata.pkl'), 'rb') as file:
+            metadata = pickle.load(file)
+
+        # 重新构造数据列表
+        data_list = [{'part_content': c, 'metadata': m} for c, m in zip(content, metadata)]
+        return data_list, content, metadata
+
+    def build_index(self, output_path, index_name=None):
+        if not index_name:
+            index_name = str(uuid.uuid4())
+        index_folder = self.get_index_folder(output_path, index_name)
+        os.makedirs(index_folder, exist_ok=True)
+        embedding_path = os.path.join(index_folder, 'embeddings')
+        os.makedirs(embedding_path, exist_ok=True)
+
+        with open(os.path.join(embedding_path, 'index.faiss'), 'wb') as f:
+            pickle.dump(self.faiss_vectorstore.index, f)
+
+        with open(os.path.join(embedding_path, 'docstore.pkl'), 'wb') as f:
+            pickle.dump(self.faiss_vectorstore.docstore, f)
+
+        with open(os.path.join(embedding_path, 'index_to_docstore_id.pkl'), 'wb') as f:
+            pickle.dump(self.faiss_vectorstore.index_to_docstore_id, f)
+
+        with open(os.path.join(index_folder, 'embedding_model_params.pkl'), 'wb') as file:
+            pickle.dump(self.embedding_model, file)
+
+        with open(os.path.join(index_folder, 'content.pkl'), 'wb') as file:
+            pickle.dump(self.content, file)
+
+        with open(os.path.join(index_folder, 'metadata.pkl'), 'wb') as file:
+            pickle.dump(self.metadata, file)
+
+        print(f"Index saved to {index_folder}")
+
+
+if __name__ == '__main__':
+    index_name = "openai_index"  # 定义索引名（如果不指定则自动使用uuid生成）
+    output_path = "./index"  # 定义索引的存储路径
+    openai_api_base = "https://api.openai.com/v1"
+    openai_api_key = "sk-xxx"
+
+    # 用一个文件构建初始索引
+    file_paths = [
+        "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
+    ]
+    indexer = OpenAIIndexer(file_paths, openai_api_base, openai_api_key)
+    indexer.build_index(output_path, index_name)
+
+    # 用另一个文件和旧索引增量构建新索引
+    new_file_paths = [
+        "../../data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json"
+    ]
+    old_index_path = os.path.join(output_path, index_name)
+    indexer = OpenAIIndexer(new_file_paths, openai_api_base, openai_api_key, old_index_path=old_index_path)
+    indexer.build_index(output_path, index_name)
+```
+
+#### 3.4.2 实现OpenAI Embedding检索
+
+./rag-omni/retrieval/openai_embedding/openai_retrieval.py
+
+```python
+# -*- coding: utf-8 -*-
+
+import os
+import pickle
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+import json
+
+
+class OpenAIRetrieval:
+    def __init__(self, index_folder):
+        self.embedding_model_params = self.load_embedding_model_params(index_folder)
+        self.embedding_model = OpenAIEmbeddings(**self.embedding_model_params)
+        self.faiss_vectorstore, self.content, self.metadata = self.load_data(index_folder)
+
+    def load_embedding_model_params(self, index_folder):
+        embedding_model_path = os.path.join(index_folder, 'embedding_model_params.pkl')
+        if not os.path.exists(embedding_model_path):
+            raise FileNotFoundError(f"Embedding model params file not found: {embedding_model_path}")
+        with open(embedding_model_path, 'rb') as file:
+            embedding_model_params = pickle.load(file)
+        return embedding_model_params
+
+    def load_data(self, index_folder):
+        embedding_path = os.path.join(index_folder, 'embeddings')
+        index_file = os.path.join(embedding_path, 'index.faiss')
+        docstore_file = os.path.join(embedding_path, 'docstore.pkl')
+        index_to_docstore_id_file = os.path.join(embedding_path, 'index_to_docstore_id.pkl')
+
+        if not os.path.exists(index_file):
+            raise FileNotFoundError(f"FAISS index file not found: {index_file}")
+        if not os.path.exists(docstore_file):
+            raise FileNotFoundError(f"Docstore file not found: {docstore_file}")
+        if not os.path.exists(index_to_docstore_id_file):
+            raise FileNotFoundError(f"Index to docstore ID file not found: {index_to_docstore_id_file}")
+
+        with open(index_file, 'rb') as f:
+            index = pickle.load(f)
+        with open(docstore_file, 'rb') as f:
+            docstore = pickle.load(f)
+        with open(index_to_docstore_id_file, 'rb') as f:
+            index_to_docstore_id = pickle.load(f)
+
+        embedding_model_instance = OpenAIEmbeddings(**self.embedding_model_params)
+        faiss_vectorstore = FAISS(
+            index=index,
+            embedding_function=embedding_model_instance,
+            docstore=docstore,
+            index_to_docstore_id=index_to_docstore_id
+        )
+
+        content_file = os.path.join(index_folder, 'content.pkl')
+        metadata_file = os.path.join(index_folder, 'metadata.pkl')
+
+        if not os.path.exists(content_file):
+            raise FileNotFoundError(f"Content file not found: {content_file}")
+        if not os.path.exists(metadata_file):
+            raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
+
+        with open(content_file, 'rb') as file:
+            content = pickle.load(file)
+        with open(metadata_file, 'rb') as file:
+            metadata = pickle.load(file)
+        return faiss_vectorstore, content, metadata
+
+    def search(self, query, top_k=5):
+        results = self.faiss_vectorstore.similarity_search(query, k=len(self.content))
+        # 如果 top_k 为 -1，则返回所有结果
+        if top_k == -1:
+            top_k = len(results)
+        results = results[:top_k]
+        search_results = []
+        for item in results:
+            result = {
+                "file_name": item.metadata['file_name'],
+                "part_content": item.page_content
+            }
+            search_results.append(result)
+        return search_results
+
+
+if __name__ == '__main__':
+    index_folder = "./index/openai_index"
+    query_text = "国务院对于地方政府性债务管理的意见"
+    top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
+    openai_retriever = OpenAIRetrieval(index_folder)
+    results = openai_retriever.search(query_text, top_k=top_k)
+    print(json.dumps(results, ensure_ascii=False, indent=4))
+```
+
+### 3.5 构建索引文件
+
+#### 3.5.1 封装索引构建
 
 ./rag-omni/retrieval/retrieval_index.py
 
@@ -912,7 +1156,9 @@ if __name__ == '__main__':
 import argparse
 import logging
 from bge.bge_index import BGEIndexer
-from bm25.bm25_index import BM25Builder
+from bm25.bm25_index import BM25Indexer
+from openai_embedding.openai_index import OpenAIIndexer
+
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -920,7 +1166,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="构建索引的参数")
     parser.add_argument('--file_paths', type=str, nargs='+', required=True, help="JSON知识文件路径（支持一个或多个文件路径）")
-    parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE'], required=True, help="索引算法：目前仅支持BM25或BGE")
+    parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE', 'OpenAI'], required=True, help="索引算法：目前仅支持BM25、BGE、OpenAI")
+    parser.add_argument('--api_base_url', type=str, default="https://api.openai.com/v1", help="LLM API Base URL")
+    parser.add_argument('--api_key', type=str, help="LLM API Key")
     parser.add_argument('--output_path', type=str, required=True, help="索引存储路径")
     parser.add_argument('--index_name', type=str, required=False, help="索引名（可选，如果不指定则自动使用UUID生成）")
     parser.add_argument('--old_index_path', type=str, required=False, help="旧索引路径（可选，传递旧索引则增量构建）")
@@ -928,6 +1176,8 @@ if __name__ == '__main__':
 
     file_paths = args.file_paths
     algorithm = args.algorithm
+    api_base_url = args.api_base_url
+    api_key = args.api_key
     output_path = args.output_path
     index_name = args.index_name
     old_index_path = args.old_index_path
@@ -936,21 +1186,27 @@ if __name__ == '__main__':
         if algorithm == 'BGE':
             logging.info("开始构建BGE索引...")
             indexer = BGEIndexer(file_paths, old_index_path)
-            indexer.save_index(output_path, index_name)
+            indexer.build_index(output_path, index_name)
             logging.info("BGE索引构建成功")
         elif algorithm == 'BM25':
             logging.info("开始构建BM25索引...")
-            builder = BM25Builder(file_paths, old_index_path)
-            builder.build_index(output_path, index_name)
+            indexer = BM25Indexer(file_paths, old_index_path)
+            indexer.build_index(output_path, index_name)
             logging.info("BM25索引构建成功")
+        elif algorithm == 'OpenAI':
+            logging.info("开始构建OpenAI索引...")
+            indexer = OpenAIIndexer(file_paths, api_base_url, api_key, old_index_path=old_index_path)
+            indexer.build_index(output_path, index_name)
+            logging.info("OpenAI索引构建成功")
         else:
-            raise ValueError("Unsupported algorithm. Please choose either 'BM25' or 'BGE'.")
+            raise ValueError("Unsupported algorithm. Please choose either 'BM25' 'BGE' or 'OpenAI'.")
     except Exception as e:
         logging.error(f"索引构建失败: {e}")
         raise
+
 ```
 
-#### 3.4.2 生成索引文件并测试
+#### 3.5.2 生成索引文件并测试
 
 以下示例命令里为了演示增量构建索引的流程，将构建索引文件分成两步了，实际使用时可以一步进行构建。file_paths 参数传递知识文件，多个使用逗号进行分隔，旧索引路径是可选项，如果传递进去则会增量构建，不传递则使用知识文件从零构建。
 
@@ -962,13 +1218,17 @@ $ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/�
 // 构建BGE索引
 $ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json" --algorithm BGE --output_path "./retrieval/bge/index" --index_name "bge_index"
 $ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json" --algorithm BGE --output_path "./retrieval/bge/index" --index_name "bge_index" --old_index_path "./retrieval/bge/index/bge_index.npz"
+
+// 构建OpenAI Embedding索引
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json" --algorithm OpenAI --output_path "./retrieval/openai_embedding/index" --index_name "openai_index" --api_base_url "https://api.openai.com/v1" --api_key "sk-xxx"
+$ python3 ./retrieval/retrieval_index.py --file_paths "./data/preprocess_data/中共中央办公厅国务院办公厅印发《关于做好地方政府专项债券发行及项目配套融资工作的通知》.json" --algorithm OpenAI --output_path "./retrieval/openai_embedding/index" --index_name "openai_index" --old_index_path "./retrieval/openai_embedding/index/openai_index" --api_base_url "https://api.openai.com/v1" --api_key "sk-xxx"
 ```
 
-注：构建完之后，拿 ./rag-omni/retrieval/bm25/bm25_retrieval.py 和 ./rag-omni/retrieval/bge/bge_retrieval.py 程序里的 main 测试是否能够检索即可。
+注：构建完之后，拿对应检索程序里的 main 测试是否能够检索即可。
 
-### 3.5 部署检索服务
+### 3.6 部署检索服务
 
-#### 3.5.1 封装检索服务
+#### 3.6.1 封装检索服务
 
 这里使用 Flask 框架将 BM25、BGE检索算法封装成一个服务（log.py、response.py、code.py此处省略）。启动时需要传入知识库文件路径（json_files）、检索算法（algorithm）、服务端口号（port），/api/rag/retrieval 接口入参接受输入问题（question）和检索条数（top_k）。
 
@@ -985,17 +1245,18 @@ from pre_request import pre, Rule
 
 from log import logger
 from response import ResponseCode, ResponseMessage
-from bm25.bm25_retrieval import BM25Algorithm
-from bge.bge_retrieval import BGEAlgorithm
+from bm25.bm25_retrieval import BM25Retrieval
+from bge.bge_retrieval import BGERetrieval
+from openai_embedding.openai_retrieval import OpenAIRetrieval
 
 # 解析启动参数
 parser = argparse.ArgumentParser(description="启动参数")
-parser.add_argument('--index_file', type=str, required=True, help="索引文件路径")
-parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE'], required=True, help="检索算法：目前仅支持BM25或BGE")
+parser.add_argument('--index_path', type=str, required=True, help="索引路径")
+parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE', 'OpenAI'], required=True, help="检索算法：目前仅支持BM25、BGE、OpenAI")
 parser.add_argument('--port', type=int, default=5001, help="启动的端口号，默认5001")
 args = parser.parse_args()
 
-index_file = args.index_file
+index_path = args.index_path
 retrieval_algorithm = args.algorithm
 port = args.port
 
@@ -1005,9 +1266,11 @@ CORS(app, supports_credentials=True)
 
 # 初始化检索算法
 if retrieval_algorithm == 'BM25':
-    search_engine = BM25Algorithm(index_file)
+    search_engine = BM25Retrieval(index_path)
 elif retrieval_algorithm == 'BGE':
-    search_engine = BGEAlgorithm(index_file)
+    search_engine = BGERetrieval(index_path)
+elif retrieval_algorithm == 'OpenAI':
+    search_engine = OpenAIRetrieval(index_path)
 else:
     raise ValueError("Unsupported retrieval algorithm")
 
@@ -1054,14 +1317,15 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
 ```
 
-#### 3.5.2 启动检索服务并测试
+#### 3.6.2 启动检索服务并测试
 
 选择索引文件启动检索服务，以下两种检索服务选择一个进行启动即可。
 
 ```shell
 $ cd ./retrieval
-$ python3 retrieval_server.py --index_file "./bm25/index/bm25_index.json" --algorithm BM25 --port 5001  // 启动BM25检索服务
-$ python3 retrieval_server.py --index_file "./bge/index/bge_index.npz" --algorithm BGE --port 5001      // 启动BGE检索服务
+$ python3 retrieval_server.py --index_path "./bm25/index/bm25_index.json" --algorithm BM25 --port 5001  // 启动BM25检索服务
+$ python3 retrieval_server.py --index_path "./bge/index/bge_index.npz" --algorithm BGE --port 5001      // 启动BGE检索服务
+$ python3 retrieval_server.py --index_path "./openai_embedding/index/openai_index" --algorithm OpenAI --port 5001 // 启动OpenAI Embedding检索服务
 ```
 
 ./rag-omni/retrieval/test/retrieval_test.py 可用来测试检索服务
@@ -1457,7 +1721,37 @@ if __name__ == "__main__":
 
 ![RAG请求历史记录-含问题重构](README.assets/RAG请求历史记录-含问题重构.png)
 
-### 4.3 将RAG服务接入场景页面
+### 4.4 RAG整体效果评测与调优
+
+可以准备个规范化的测试用例数据集，里面包含若干类评测问题，然后写个脚本调用RAG服务，将结果写入进去，然后对比标准答案评估效果。
+
+```json
+{
+  "conversations": [
+    {
+      "question_type": "测试问题类型",
+      "rounds": [
+        {
+          "question": "测试问题用例1",
+          "standard_answer": "测试问题用例1的标准答案",
+          "rag_answer": "测试问题用例1的RAG回复",
+          "rag_answer_result": "准确"
+        },
+        {
+          "question": "测试问题用例1的后续问题",
+          "standard_answer": "测试问题用例1的后续问题的标准答案",
+          "rag_answer": "测试问题用例1的后续问题的RAG回复",
+          "rag_answer_result": "不准确"
+        }
+      ]
+    }
+  ]
+}
+```
+
+实际RAG问答的部分优化方向：上下文记录历史连续对话、对于无关问题的处理、输入信息不完备时给出推理或者让用户补充、判断是否使用检索出的数据、检索相近语义数据、开源模型计算和推理的能力差、组合问题需要分解步骤去操作、检索结果涉及多跳问题。
+
+### 4.4 将RAG服务接入场景页面
 
 场景页面是使用 Vue 开发的，服务地址已经在 ./rag-omni/chat/src/App.vue 上进行对接了，如果要更换的话，直接在上面修改即可。
 
@@ -1469,3 +1763,4 @@ $ npm run serve
 使用Chrome浏览器访问 `http://127.0.0.1:5003` 页面。
 
 ![将RAG服务接入场景页面](README.assets/将RAG服务接入场景页面.png)
+
