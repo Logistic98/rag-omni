@@ -8,17 +8,18 @@ from pre_request import pre, Rule
 
 from log import logger
 from response import ResponseCode, ResponseMessage
-from bm25.bm25_retrieval import BM25Algorithm
-from bge.bge_retrieval import BGEAlgorithm
+from bm25.bm25_retrieval import BM25Retrieval
+from bge.bge_retrieval import BGERetrieval
+from openai_embedding.openai_retrieval import OpenAIRetrieval
 
 # 解析启动参数
 parser = argparse.ArgumentParser(description="启动参数")
-parser.add_argument('--index_file', type=str, required=True, help="索引文件路径")
-parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE'], required=True, help="检索算法：目前仅支持BM25或BGE")
+parser.add_argument('--index_path', type=str, required=True, help="索引路径")
+parser.add_argument('--algorithm', type=str, choices=['BM25', 'BGE', 'OpenAI'], required=True, help="检索算法：目前仅支持BM25、BGE、OpenAI")
 parser.add_argument('--port', type=int, default=5001, help="启动的端口号，默认5001")
 args = parser.parse_args()
 
-index_file = args.index_file
+index_path = args.index_path
 retrieval_algorithm = args.algorithm
 port = args.port
 
@@ -28,9 +29,11 @@ CORS(app, supports_credentials=True)
 
 # 初始化检索算法
 if retrieval_algorithm == 'BM25':
-    search_engine = BM25Algorithm(index_file)
+    search_engine = BM25Retrieval(index_path)
 elif retrieval_algorithm == 'BGE':
-    search_engine = BGEAlgorithm(index_file)
+    search_engine = BGERetrieval(index_path)
+elif retrieval_algorithm == 'OpenAI':
+    search_engine = OpenAIRetrieval(index_path)
 else:
     raise ValueError("Unsupported retrieval algorithm")
 

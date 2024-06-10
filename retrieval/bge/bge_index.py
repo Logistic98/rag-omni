@@ -22,18 +22,14 @@ class BGEIndexer:
         self.cuda_oom_flag = False
 
     def load_data(self, file_paths):
-        """读取数据文件"""
         data_list = []
         for file_path in file_paths:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for item in data:
-                item['file_name'] = os.path.basename(file_path)
-                data_list.append(item)
+            data_list.extend(data)
         return data_list
 
     def generate_embeddings(self):
-        """生成嵌入"""
         embeddings_list = []
         batch_size = 4
         has_switched_to_cpu = False
@@ -79,8 +75,7 @@ class BGEIndexer:
         new_embeddings_list = np.vstack((old_embeddings_list, self.embeddings_list))
         return new_data_list, new_embeddings_list
 
-    def save_index(self, output_path, index_name=None):
-        """保存索引到文件"""
+    def build_index(self, output_path, index_name=None):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
         if not index_name:
@@ -104,7 +99,7 @@ if __name__ == '__main__':
         "../../data/preprocess_data/国务院关于加强地方政府性债务管理的意见.json"
     ]
     indexer = BGEIndexer(file_paths)
-    indexer.save_index(output_path, index_name=index_name)
+    indexer.build_index(output_path, index_name=index_name)
 
     # 用另一个文件和旧索引增量构建新索引
     file_paths = [
@@ -112,4 +107,4 @@ if __name__ == '__main__':
     ]
     old_index_path = os.path.join(output_path, f'{index_name}.npz')
     indexer = BGEIndexer(file_paths, old_index_path)
-    indexer.save_index(output_path, index_name=index_name)
+    indexer.build_index(output_path, index_name=index_name)

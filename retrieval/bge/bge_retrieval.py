@@ -8,7 +8,7 @@ import torch
 import faiss
 
 
-class BGEAlgorithm:
+class BGERetrieval:
     def __init__(self, index_file):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,6 @@ class BGEAlgorithm:
         self.faiss_index = self.build_faiss_index()
 
     def load_index(self, index_file):
-        """加载索引文件"""
         data = np.load(index_file, allow_pickle=True)
         embeddings_list = data['embeddings_list']
         data_list_json = data['data_list'].item()
@@ -27,13 +26,11 @@ class BGEAlgorithm:
         return data_list, embeddings_list
 
     def build_faiss_index(self):
-        """构建Faiss索引"""
         faiss_index = faiss.IndexFlatIP(self.embeddings_list.shape[1])
         faiss_index.add(self.embeddings_list)
         return faiss_index
 
     def search(self, query, top_k=-1):
-        """检索函数"""
         inputs = self.tokenizer(query, return_tensors='pt', padding=True, truncation=True, max_length=512).to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -57,7 +54,7 @@ class BGEAlgorithm:
 if __name__ == '__main__':
     index_file = "./index/bge_index.npz"
     query_text = "国务院对于地方政府性债务管理的意见"
-    top_k = 5  # 可以设置为任意正整数，或者-1表示不限制
-    retriever = BGEAlgorithm(index_file)
+    top_k = -1  # 可以设置为任意正整数，或者-1表示不限制
+    retriever = BGERetrieval(index_file)
     results = retriever.search(query_text, top_k)
     print(json.dumps(results, ensure_ascii=False, indent=4))
