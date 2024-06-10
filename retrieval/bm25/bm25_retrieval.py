@@ -49,6 +49,7 @@ class BM25Retrieval(object):
         with open(self.index_path, 'r', encoding='utf8') as f:
             data = json.load(f)
             param = BM25Param(**data)
+        param.length = len(param.f)
         return param
 
     def _cal_similarity(self, words, index):
@@ -70,7 +71,9 @@ class BM25Retrieval(object):
 
         words = [word for word in jieba.lcut(query) if word and word not in self._stop_words]
         score_list = []
-        for index in range(self.param.length):
+        for index in range(len(self.param.f)):
+            if index >= len(self.param.f):
+                raise IndexError(f"Index {index} is out of range for parameter f")
             score = self._cal_similarity(words, index)
             score_list.append((self.param.docs_list[index], score))
 
