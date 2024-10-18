@@ -337,9 +337,9 @@ if __name__ == '__main__':
 
 ```ini
 upstream nginx_balance {
-        server 127.0.0.1:4999 weight=1;
-        server 127.0.0.1:4998 weight=1;
-        server 127.0.0.1:4997 weight=1;
+        server 127.0.0.1:4999 weight=1 max_fails=1 fail_timeout=10s;
+        server 127.0.0.1:4998 weight=1 max_fails=1 fail_timeout=10s;
+        server 127.0.0.1:4997 weight=1 max_fails=1 fail_timeout=10s;
 }
 server {
     listen       5000;
