@@ -337,9 +337,9 @@ if __name__ == '__main__':
 
 ```ini
 upstream nginx_balance {
-        server 127.0.0.1:4999 weight=1;
-        server 127.0.0.1:4998 weight=1;
-        server 127.0.0.1:4997 weight=1;
+        server 127.0.0.1:4999 weight=1 max_fails=1 fail_timeout=10s;
+        server 127.0.0.1:4998 weight=1 max_fails=1 fail_timeout=10s;
+        server 127.0.0.1:4997 weight=1 max_fails=1 fail_timeout=10s;
 }
 server {
     listen       5000;
@@ -1761,6 +1761,8 @@ if __name__ == "__main__":
 ```
 
 实际RAG问答的部分优化方向：上下文记录历史连续对话、对于无关问题的处理、输入信息不完备时给出推理或者让用户补充、判断是否使用检索出的数据、检索相近语义数据、开源模型计算和推理的能力差、组合问题需要分解步骤去操作、检索结果涉及多跳问题。
+
+如果需要实际使用效果的话，可参考借鉴 [https://github.com/infiniflow/ragflow](https://github.com/infiniflow/ragflow) 项目，如何搭建及使用详见我的另一篇博客：[基于RAG的知识库问答平台使用指南](https://www.eula.club/blogs/基于RAG的知识库问答平台使用指南.html)
 
 ### 4.4 将RAG服务接入场景页面
 
