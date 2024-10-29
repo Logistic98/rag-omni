@@ -354,6 +354,8 @@ server {
         gzip_types text/plain application/javascript application/x-javascript text/css text/xml text/javascript application/json;
         proxy_pass http://nginx_balance;
         client_max_body_size    48m;
+        # 添加proxy_next_upstream指令，实现失败时的自动跳转
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
         include proxy.conf;
     }
 }
