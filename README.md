@@ -405,11 +405,11 @@ retrieval
     └── retrieval_test.py                 // 测试检索服务
 ```
 
-### 3.2 BM25检索算法
+### 3.2  BM25检索
 
 BM25算法较为简单，这里就直接实现了。除此之外，BM25为ES默认的相关性排序算法，也可以借助ES去实现。
 
-#### 3.2.1 构建BM25索引
+#### 3.2.1 BM25索引的构建
 
 支持增量构建BM25索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
 
@@ -576,7 +576,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name=index_name)
 ```
 
-#### 3.2.2 实现BM25检索
+#### 3.2.2 BM25的检索实现
 
 ./rag-omni/retrieval/bm25/bm25_retrieval.py
 
@@ -686,7 +686,7 @@ if __name__ == '__main__':
 
 注：代码中会用到 stop_words.txt 文件，已经放到项目里了，这里就不展示了。
 
-### 3.3 BGE检索算法
+### 3.3 BGE检索
 
 BGE向量检索需要下载 BAAI/bge-large-zh-v1.5 模型文件，项目里提供了模型下载脚本。
 
@@ -723,7 +723,7 @@ if __name__ == '__main__':
     download_and_save_model(model_name, save_directory)
 ```
 
-#### 3.3.1 构建BGE索引
+#### 3.3.1 BGE索引的构建
 
 支持增量构建BGE索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
 
@@ -842,7 +842,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name=index_name)
 ```
 
-#### 3.3.2 实现BGE检索
+#### 3.3.2 BGE的检索实现
 
 ./rag-omni/retrieval/bge/bge_retrieval.py
 
@@ -909,9 +909,9 @@ if __name__ == '__main__':
     print(json.dumps(results, ensure_ascii=False, indent=4))
 ```
 
-### 3.4 OpenAI Embedding检索算法
+### 3.4 OpenAI嵌入检索
 
-#### 3.4.1 构建OpenAI Embedding索引
+#### 3.4.1 OpenAI嵌入索引的构建
 
 ./rag-omni/retrieval/openai_embedding/openai_index.py
 
@@ -1054,7 +1054,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name)
 ```
 
-#### 3.4.2 实现OpenAI Embedding检索
+#### 3.4.2 OpenAI嵌入的检索实现
 
 ./rag-omni/retrieval/openai_embedding/openai_retrieval.py
 
