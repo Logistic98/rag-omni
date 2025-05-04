@@ -53,8 +53,8 @@
               <voice-input-button
                 color="#fff"
                 appId="d9ecd998"
-                apiKey="f57978586f51f6c9da23b227c29eb3d0"
-                apiSecret="ZmNkMzBkMTRlZDRmZWQ1Y2NiMmJiNjVj"
+                apiKey="xxx"
+                apiSecret="yyy"
                 v-model="text"
                 @record="showResult"
                 @record-start="recordStart"
@@ -80,7 +80,7 @@
 
 <script>
 import voiceInputButton from 'voice-input-button2';
-import 'github-markdown-css';
+import "github-markdown-css/github-markdown-light.css";
 import VueMarkdown from 'vue-markdown';
 
 export default {
@@ -303,21 +303,16 @@ export default {
 
 <style scoped>
 
-/* 整个滚动条 */
 ::-webkit-scrollbar {
-  /* 对应纵向滚动条的宽度 */
   width: 5px;
-  /* 对应横向滚动条的宽度 */
   height: 5px;
 }
 
-/* 滚动条上的滚动滑块 */
 ::-webkit-scrollbar-thumb {
   background-color: #b2b2b2;
   border-radius: 32px;
 }
 
-/* 滚动条轨道 */
 ::-webkit-scrollbar-track {
   background-color: #dbeffd;
   border-radius: 32px;

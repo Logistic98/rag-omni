@@ -6,7 +6,7 @@
 
 实验环境：实体GPU服务器，NVIDIA RTX 4090 / 24GB，CentOS 7.9，Anaconda3-2019.03，CUDA 12.4
 
-如果没有GPU服务器，可以租用AutoDL等平台的。服务器的租用及基础环节的安装这里就不赘述了，详见我的另一篇博客：[常用深度学习平台的使用指南](https://www.eula.club/blogs/常用深度学习平台的使用指南.html)
+如果没有GPU服务器，可以租用AutoDL等平台的。服务器的租用及基础环节的安装这里就不赘述了，详见我的另一篇博客：[常用深度学习平台的使用指南](https://www.imiao.top/blogs/常用深度学习平台的使用指南.html)
 
 ### 1.2 实例场景及源码
 
@@ -175,7 +175,7 @@ llm
     └── llm_server_test.py
 ```
 
-注：开启vLLM可以充分利用显卡计算资源，带来更好的推理性能，详见我的另一篇博客：[基于vLLM加速大模型推理服务](https://www.eula.club/blogs/基于vLLM加速大模型推理服务.html)
+注：开启vLLM可以充分利用显卡计算资源，带来更好的推理性能，详见我的另一篇博客：[基于vLLM加速大模型推理服务](https://www.imiao.top/blogs/基于vLLM加速大模型推理服务.html)
 
 ### 2.2 部署大模型服务并进行测试
 
@@ -329,7 +329,7 @@ if __name__ == '__main__':
 
 需求情景：一台服务器上有多张显卡，用不同的显卡部署了多个大模型服务，现在想要进一步提高大模型服务的并发量，可以使用Nginx负载均衡来实现。
 
-- 有关Nginx负载均衡的具体配置策略这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.eula.club/blogs/Docker容器化及项目环境管理.html)
+- 有关Nginx负载均衡的具体配置策略这里不再赘述，详见我的另一篇博客：[Docker容器化及项目环境管理](https://www.imiao.top/blogs/Docker容器化及项目环境管理.html)
 
 这里假设启动了3个大模型服务，端口号分别是4997、4998、4999，现在想要将其都配置到5000端口上。修改以下配置文件，换成实际的服务地址，weight=1是权重，这里默认各服务为相同权重。
 
@@ -405,11 +405,11 @@ retrieval
     └── retrieval_test.py                 // 测试检索服务
 ```
 
-### 3.2 BM25检索算法
+### 3.2  BM25检索
 
 BM25算法较为简单，这里就直接实现了。除此之外，BM25为ES默认的相关性排序算法，也可以借助ES去实现。
 
-#### 3.2.1 构建BM25索引
+#### 3.2.1 BM25索引的构建
 
 支持增量构建BM25索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
 
@@ -576,7 +576,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name=index_name)
 ```
 
-#### 3.2.2 实现BM25检索
+#### 3.2.2 BM25的检索实现
 
 ./rag-omni/retrieval/bm25/bm25_retrieval.py
 
@@ -686,7 +686,7 @@ if __name__ == '__main__':
 
 注：代码中会用到 stop_words.txt 文件，已经放到项目里了，这里就不展示了。
 
-### 3.3 BGE检索算法
+### 3.3 BGE检索
 
 BGE向量检索需要下载 BAAI/bge-large-zh-v1.5 模型文件，项目里提供了模型下载脚本。
 
@@ -723,7 +723,7 @@ if __name__ == '__main__':
     download_and_save_model(model_name, save_directory)
 ```
 
-#### 3.3.1 构建BGE索引
+#### 3.3.1 BGE索引的构建
 
 支持增量构建BGE索引，因此 main 里的构建索引拆成了两步作为示例。索引路径和索引名可以自行指定，如果不指定索引名则自动使用uuid生成。
 
@@ -842,7 +842,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name=index_name)
 ```
 
-#### 3.3.2 实现BGE检索
+#### 3.3.2 BGE的检索实现
 
 ./rag-omni/retrieval/bge/bge_retrieval.py
 
@@ -909,9 +909,9 @@ if __name__ == '__main__':
     print(json.dumps(results, ensure_ascii=False, indent=4))
 ```
 
-### 3.4 OpenAI Embedding检索算法
+### 3.4 OpenAI嵌入检索
 
-#### 3.4.1 构建OpenAI Embedding索引
+#### 3.4.1 OpenAI嵌入索引的构建
 
 ./rag-omni/retrieval/openai_embedding/openai_index.py
 
@@ -1054,7 +1054,7 @@ if __name__ == '__main__':
     indexer.build_index(output_path, index_name)
 ```
 
-#### 3.4.2 实现OpenAI Embedding检索
+#### 3.4.2 OpenAI嵌入的检索实现
 
 ./rag-omni/retrieval/openai_embedding/openai_retrieval.py
 
@@ -1764,7 +1764,7 @@ if __name__ == "__main__":
 
 实际RAG问答的部分优化方向：上下文记录历史连续对话、对于无关问题的处理、输入信息不完备时给出推理或者让用户补充、判断是否使用检索出的数据、检索相近语义数据、开源模型计算和推理的能力差、组合问题需要分解步骤去操作、检索结果涉及多跳问题。
 
-如果需要实际使用效果的话，可参考借鉴 [https://github.com/infiniflow/ragflow](https://github.com/infiniflow/ragflow) 项目，如何搭建及使用详见我的另一篇博客：[基于RAG的知识库问答平台使用指南](https://www.eula.club/blogs/基于RAG的知识库问答平台使用指南.html)
+如果需要实际使用效果的话，可参考借鉴 [https://github.com/infiniflow/ragflow](https://github.com/infiniflow/ragflow) 项目，如何搭建及使用详见我的另一篇博客：[基于RAG的知识库问答平台使用指南](https://www.imiao.top/blogs/基于RAG的知识库问答平台使用指南.html)
 
 ### 4.4 将RAG服务接入场景页面
 
